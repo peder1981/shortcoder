@@ -252,13 +252,13 @@ Return aLines
 /*/
 Static Function ShowBBSHeader(cEsc, nWidth)
     Local cArt := cEsc + "[1;33m" + ;
-        " ╔" + Replicate("�?", nWidth - 2) + "╗" + Chr(10) + ;
+        " ╔" + Replicate("═", nWidth - 2) + "╗" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + PadCenter("SHORTCODER", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + PadCenter("[AI Coding Agent v1.0] [BBS Edition]", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ╚" + Replicate("�?", nWidth - 2) + "�?" + cEsc + "[0m"
+        " ╚" + Replicate("═", nWidth - 2) + "╝" + cEsc + "[0m"
     
     ConOut(cArt)
 Return Nil
@@ -290,7 +290,7 @@ Static Function ShowStatus(cEsc, cModel, cSession, cAgent, cMemUser, nWidth)
     cLine4 := " │ MEM0:   [" + cEsc + "[1;33m" + cMemUser + cEsc + "[36m" + "]                            │"
     
     ConOut(cEsc + "[2;36m" + ;
-        " ┌" + Replicate("─", nWidth - 2) + "�?" + Chr(10) + ;
+        " ┌" + Replicate("─", nWidth - 2) + "┐" + Chr(10) + ;
         cLine1 + Chr(10) + ;
         cLine2 + Chr(10) + ;
         cLine3 + Chr(10) + ;
