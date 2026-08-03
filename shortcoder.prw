@@ -256,7 +256,7 @@ Static Function ShowBBSHeader(cEsc, nWidth)
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + PadCenter("SHORTCODER", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ║" + PadCenter("[AI Coding Agent v1.0] [BBS Edition]", nWidth - 2) + "║" + Chr(10) + ;
+        " ║" + PadCenter("[AI Coding Agent v1.0]", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ╚" + Replicate("═", nWidth - 2) + "╝" + cEsc + "[0m"
     
