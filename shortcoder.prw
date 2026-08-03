@@ -101,18 +101,6 @@ Return
 Static Function NewSessionId()
 Return "user-" + DToS(Date()) + "-" + StrTran(Str(Seconds(), 12, 3), ".", "")
 
-/*/{Protheus.doc} JsonEscape
-    Escapa uma string para uso segura dentro de um valor JSON
-@type function
-/*/
-Static Function JsonEscape(cText)
-    Local cResult := cText
-    cResult := StrTran(cResult, "\", "\\")
-    cResult := StrTran(cResult, Chr(34), '\"')
-    cResult := StrTran(cResult, Chr(10), "\n")
-    cResult := StrTran(cResult, Chr(13), "")
-Return cResult
-
 /*/{Protheus.doc} LoadModels
 @type function
 /*/
@@ -714,3 +702,15 @@ Static Function ShowHistory(cEsc, aHistory, nWidth)
     ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
     ConOut("")
 Return Nil
+
+/*/{Protheus.doc} JsonEscape
+    Escapa uma string para uso segura dentro de um valor JSON
+@type function
+/*/
+Static Function JsonEscape(cText)
+    Local cResult := cText
+    cResult := StrTran(cResult, "\", "\\")
+    cResult := StrTran(cResult, Chr(34), '\"')
+    cResult := StrTran(cResult, Chr(10), "\n")
+    cResult := StrTran(cResult, Chr(13), "")
+Return cResult
