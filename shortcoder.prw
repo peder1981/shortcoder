@@ -418,6 +418,42 @@ Return cEsc + "[" + cColor + "m ├" + Replicate("─", nInner) + "┤" + cEsc +
 Static Function BoxBottom(cEsc, nInner, cColor)
 Return cEsc + "[" + cColor + "m └" + Replicate("─", nInner) + "┘" + cEsc + "[0m"
 
+/*/{Protheus.doc} BoxTopD / BoxDivD / BoxBottomD / BoxShadeD
+    Variante de moldura dupla (╔═╗║╚═╝), a mesma usada no header do
+    SHORTCODER — reservada para telas de menu/painel (Help, selecao de
+    agente/modelo, historico), que ganham tambem uma faixa de shading
+    (▒/░) como nas dele, em vez da caixa simples usada nas respostas
+    dinamicas dos agentes.
+@type function
+/*/
+Static Function BoxTopD(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m ╔" + Replicate("═", nInner) + "╗" + cEsc + "[0m"
+
+Static Function BoxDivD(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m ╠" + Replicate("═", nInner) + "╣" + cEsc + "[0m"
+
+Static Function BoxBottomD(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m ╚" + Replicate("═", nInner) + "╝" + cEsc + "[0m"
+
+Static Function BoxShadeD(cEsc, nInner, cBorderColor, cShadeColor, cChar)
+Return cEsc + "[" + cBorderColor + "m ║" + cEsc + "[" + cShadeColor + "m" + Replicate(cChar, nInner) + cEsc + "[" + cBorderColor + "m║" + cEsc + "[0m"
+
+/*/{Protheus.doc} BoxLineD
+    Como BoxLine, mas com borda vertical dupla (║) para casar com
+    BoxTopD/BoxBottomD.
+@type function
+/*/
+Static Function BoxLineD(cEsc, cContent, nVisLen, nInner, cColor)
+    Local nPad := Max(0, nInner - nVisLen)
+Return cEsc + "[" + cColor + "m ║" + cEsc + "[0m" + cContent + Replicate(" ", nPad) + cEsc + "[" + cColor + "m║" + cEsc + "[0m"
+
+/*/{Protheus.doc} BoxTitleD
+    Titulo centralizado dentro de moldura dupla.
+@type function
+/*/
+Static Function BoxTitleD(cEsc, cText, nInner, cBorderColor, cTextColor)
+Return cEsc + "[" + cBorderColor + "m ║" + cEsc + "[" + cTextColor + "m" + PadCenter(cText, nInner) + cEsc + "[" + cBorderColor + "m║" + cEsc + "[0m"
+
 /*/{Protheus.doc} BoxLine
     Monta uma linha de conteudo com largura fixa em nInner, calculada a
     partir do comprimento VISIVEL (nVisLen), para a borda direita alinhar
@@ -439,6 +475,26 @@ Static Function BoxLineAuto(cEsc, cColoredText, nInner, cColor)
     Local nVis := Utf8Len(StripANSI(cEsc, cColoredText)) + 1
 Return BoxLine(cEsc, " " + cColoredText, nVis, nInner, cColor)
 
+Static Function BoxLineAutoD(cEsc, cColoredText, nInner, cColor)
+    Local nVis := Utf8Len(StripANSI(cEsc, cColoredText)) + 1
+Return BoxLineD(cEsc, " " + cColoredText, nVis, nInner, cColor)
+
+/*/{Protheus.doc} AgentColor
+    Cor associada a cada agente (mesma paleta usada em PickAgent), para
+    manter a identidade visual consistente onde o nome do agente aparece.
+@type function
+/*/
+Static Function AgentColor(cAgent)
+    Do Case
+    Case Lower(cAgent) == "ollama"
+        Return "1;36"
+    Case Lower(cAgent) == "mem0" .Or. Lower(cAgent) == "mem0/add" .Or. Lower(cAgent) == "mem0/clear"
+        Return "1;32"
+    Case Lower(cAgent) == "ernesto"
+        Return "1;35"
+    EndCase
+Return "1;37"
+
 /*/{Protheus.doc} BoxTitle
     Linha de titulo centralizada dentro da caixa.
 @type function
@@ -451,7 +507,7 @@ Return cEsc + "[" + cBorderColor + "m │" + cEsc + "[" + cTextColor + "m" + Pad
 @type function
 /*/
 Static Function BoxBlank(cEsc, nInner, cColor)
-Return BoxLine(cEsc, "", 0, nInner, cColor)
+Return BoxLineD(cEsc, "", 0, nInner, cColor)
 
 /*/{Protheus.doc} BoxSection
     Linha de cabecalho de secao (texto em negrito) dentro da caixa.
@@ -459,7 +515,7 @@ Return BoxLine(cEsc, "", 0, nInner, cColor)
 /*/
 Static Function BoxSection(cEsc, cText, nInner, cColor)
     Local cPlain := " " + cText
-Return BoxLine(cEsc, " " + cEsc + "[1m" + cText + cEsc + "[0m", Len(cPlain), nInner, cColor)
+Return BoxLineD(cEsc, " " + cEsc + "[1m" + cText + cEsc + "[0m", Len(cPlain), nInner, cColor)
 
 /*/{Protheus.doc} BoxCmdLine
     Linha "  /comando   - descricao" dentro da caixa, com o comando
@@ -468,16 +524,18 @@ Return BoxLine(cEsc, " " + cEsc + "[1m" + cText + cEsc + "[0m", Len(cPlain), nIn
 /*/
 Static Function BoxCmdLine(cEsc, cCmd, cDesc, nInner, cColor)
     Local cPlain   := "   " + PadR(cCmd, 16) + "- " + cDesc
-    Local cContent := "   " + cEsc + "[1;37m" + PadR(cCmd, 16) + cEsc + "[0m" + cEsc + "[2;37m" + "- " + cDesc + cEsc + "[0m"
-Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cColor)
+    Local cContent := "   " + cEsc + "[1;36m" + PadR(cCmd, 16) + cEsc + "[0m" + cEsc + "[2;37m" + "- " + cDesc + cEsc + "[0m"
+Return BoxLineD(cEsc, cContent, Len(cPlain), nInner, cColor)
 
 Static Function ShowBBSHelp(cEsc, nWidth)
     Local nInner := nWidth - 2
 
     ConOut("")
-    ConOut(BoxTop(cEsc, nInner, "1;33"))
-    ConOut(BoxTitle(cEsc, "[ COMMAND LIST ]", nInner, "1;33", "1;33"))
-    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxTopD(cEsc, nInner, "1;33"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxTitleD(cEsc, "[ COMMAND LIST ]", nInner, "1;33", "1;36"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxDivD(cEsc, nInner, "1;33"))
     ConOut(BoxSection(cEsc, "AGENTES:", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/agent", "Switch agent (ollama/mem0/ernesto)", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/model", "List & select model", nInner, "1;33"))
@@ -492,7 +550,7 @@ Static Function ShowBBSHelp(cEsc, nWidth)
     ConOut(BoxCmdLine(cEsc, "/history", "View conversation history", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/help", "This help screen", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/exit", "Disconnect", nInner, "1;33"))
-    ConOut(BoxBottom(cEsc, nInner, "1;33"))
+    ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
 Return Nil
 
@@ -504,13 +562,15 @@ Static Function PickAgent(cEsc, cCurrent, nWidth)
     Local cChoice
 
     ConOut("")
-    ConOut(BoxTop(cEsc, nInner, "1;33"))
-    ConOut(BoxTitle(cEsc, "[ SELECT AGENT ]", nInner, "1;33", "1;33"))
-    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxTopD(cEsc, nInner, "1;33"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxTitleD(cEsc, "[ SELECT AGENT ]", nInner, "1;33", "1;36"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxDivD(cEsc, nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "1", "1;36", "ollama",  "Fast LLM (lfm25, ~1s response)",  nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "2", "1;32", "mem0",    "Persistent memory queries",       nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "3", "1;35", "ernesto", "RAG + Memory (slow, >30s)",       nInner, "1;33"))
-    ConOut(BoxBottom(cEsc, nInner, "1;33"))
+    ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
 
     cChoice := AllTrim(ConIn("Select agent [1-3] (Enter=" + cCurrent + "): "))
@@ -533,7 +593,7 @@ Return cCurrent
 Static Function BoxOptionLine(cEsc, cNum, cNameColor, cName, cDesc, nInner, cBorderColor)
     Local cPlain   := "  [" + cNum + "] " + PadR(cName, 9) + "- " + cDesc
     Local cContent := "  " + cEsc + "[2m[" + cNum + "]" + cEsc + "[0m " + cEsc + "[" + cNameColor + "m" + PadR(cName, 9) + cEsc + "[0m" + cEsc + "[2m- " + cDesc + cEsc + "[0m"
-Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cBorderColor)
+Return BoxLineD(cEsc, cContent, Len(cPlain), nInner, cBorderColor)
 
 /*/{Protheus.doc} PickModel
 @type function
@@ -549,18 +609,20 @@ Static Function PickModel(cEsc, aModels, cCurrent, nWidth)
     EndIf
 
     ConOut("")
-    ConOut(BoxTop(cEsc, nInner, "1;33"))
-    ConOut(BoxTitle(cEsc, "[ MODEL SELECT ]", nInner, "1;33", "1;33"))
-    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxTopD(cEsc, nInner, "1;33"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxTitleD(cEsc, "[ MODEL SELECT ]", nInner, "1;33", "1;36"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxDivD(cEsc, nInner, "1;33"))
 
     For i := 1 To Min(Len(aModels), 20)
         cName    := Left(aModels[i][1], Max(0, nInner - 8))
         cPlain   := "  [" + StrZero(i, 2) + "] " + cName
-        cContent := "  " + cEsc + "[2m[" + StrZero(i, 2) + "]" + cEsc + "[0m " + cName
-        ConOut(BoxLine(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
+        cContent := "  " + cEsc + "[2m[" + StrZero(i, 2) + "]" + cEsc + "[0m " + cEsc + "[1;36m" + cName + cEsc + "[0m"
+        ConOut(BoxLineD(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
     Next i
 
-    ConOut(BoxBottom(cEsc, nInner, "1;33"))
+    ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
     
     cChoice := AllTrim(ConIn("Select model [1-" + Str(Len(aModels)) + "] or type name: "))
@@ -893,24 +955,26 @@ Static Function ShowHistory(cEsc, aHistory, nWidth)
     Local i, cPlain, cContent, cAgent, cSecs, cMsg
 
     ConOut("")
-    ConOut(BoxTop(cEsc, nInner, "1;33"))
-    ConOut(BoxSection(cEsc, "HISTORY", nInner, "1;33"))
-    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxTopD(cEsc, nInner, "1;33"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxTitleD(cEsc, "[ HISTORY ]", nInner, "1;33", "1;36"))
+    ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
+    ConOut(BoxDivD(cEsc, nInner, "1;33"))
 
     If Len(aHistory) == 0
-        ConOut(BoxLineAuto(cEsc, cEsc + "[2m[EMPTY] No conversation history" + cEsc + "[0m", nInner, "1;33"))
+        ConOut(BoxLineAutoD(cEsc, cEsc + "[2m[EMPTY] No conversation history" + cEsc + "[0m", nInner, "1;33"))
     Else
         For i := 1 To Len(aHistory)
             cAgent   := aHistory[i][1]
             cSecs    := "(" + AllTrim(Str(aHistory[i][3], 5, 1)) + "s)"
             cMsg     := Left(aHistory[i][2], Max(0, nInner - 12 - Len(cAgent) - Len(cSecs)))
             cPlain   := "  [" + StrZero(i, 3) + "] " + cAgent + " " + cSecs + " " + cMsg
-            cContent := "  " + cEsc + "[2m[" + StrZero(i, 3) + "]" + cEsc + "[0m " + cEsc + "[1m" + cAgent + cEsc + "[0m " + cEsc + "[2m" + cSecs + cEsc + "[0m " + cMsg
-            ConOut(BoxLine(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
+            cContent := "  " + cEsc + "[2m[" + StrZero(i, 3) + "]" + cEsc + "[0m " + cEsc + "[" + AgentColor(cAgent) + "m" + cAgent + cEsc + "[0m " + cEsc + "[2m" + cSecs + cEsc + "[0m " + cMsg
+            ConOut(BoxLineD(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
         Next i
     EndIf
 
-    ConOut(BoxBottom(cEsc, nInner, "1;33"))
+    ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
 Return Nil
 
