@@ -59,7 +59,7 @@ User Function Main()
             cModel := PickModel(cEsc, aModels, cModel, nWidth)
             Loop
         ElseIf Lower(cInput) == "/agent"
-            cAgent := PickAgent(cEsc, cAgent)
+            cAgent := PickAgent(cEsc, cAgent, nWidth)
             ShowStatus(cEsc, cModel, cSession, cAgent, cMemUser, nWidth)
             Loop
         ElseIf Lower(cInput) == "/mem0 list"
@@ -108,7 +108,7 @@ Static Function LoadModels(cPath, aModels, cDefModel)
     Local cJson := MemoRead(cPath)
     Local oRoot := JsonObject():New()
     Local aProvNames, cProv, oProv, aProvModels, oModel
-    Local i, j, nIdx, cId
+    Local i, j, nIdx, cId, lFound
 
     If Empty(cJson) .Or. !oRoot:FromJson(cJson)
         Return Nil
@@ -141,10 +141,19 @@ Static Function LoadModels(cPath, aModels, cDefModel)
                 If At("/", cId) > 0
                     cId := SubStr(cId, At("/", cId) + 1)
                 EndIf
-                If ValType(oModel["name"]) == "C"
-                    aAdd(aModels, {cId, oModel["name"]})
-                Else
-                    aAdd(aModels, {cId, cId})
+                lFound := .F.
+                For nIdx := 1 To Len(aModels)
+                    If aModels[nIdx][1] == cId
+                        lFound := .T.
+                        Exit
+                    EndIf
+                Next nIdx
+                If !lFound
+                    If ValType(oModel["name"]) == "C"
+                        aAdd(aModels, {cId, oModel["name"]})
+                    Else
+                        aAdd(aModels, {cId, cId})
+                    EndIf
                 EndIf
             EndIf
         Next j
@@ -158,21 +167,61 @@ Return Nil
 @type function
 /*/
 Static Function StripANSI(cEsc, cText)
-    Local cResult := cText
-    Local nIdx
+    Local cResult := ""
+    Local nLen := Len(cText)
+    Local i := 1
+    Local nRel
 
-    // Remove codes como [1;33m, [0m, etc
-    Do While At(cEsc + "[", cResult) > 0
-        nIdx := At(cEsc + "[", cResult)
-        cResult := SubStr(cResult, 1, nIdx - 1) + SubStr(cResult, nIdx + 2)
-        // Pula ate encontrar 'm'
-        nIdx := At("m", cResult)
-        If nIdx > 0
-            cResult := SubStr(cResult, 1, nIdx) + SubStr(cResult, nIdx + 1)
+    While i <= nLen
+        If SubStr(cText, i, 1) == cEsc .And. SubStr(cText, i + 1, 1) == "["
+            // Sequencia so tem digitos/';' antes do 'm' terminador, entao o
+            // primeiro 'm' a partir DAQUI (nao da string toda) e sempre o dela.
+            // Bug anterior buscava o 'm' na string toda ja processada e podia
+            // cortar em um 'm' de texto plano (ex.: "Memory"), quebrando a conta.
+            nRel := At("m", SubStr(cText, i))
+            If nRel > 0
+                i := i + nRel
+            Else
+                i := i + 2
+            EndIf
+        Else
+            cResult := cResult + SubStr(cText, i, 1)
+            i++
         EndIf
-    Loop
-    
+    End
+
 Return cResult
+
+/*/{Protheus.doc} Utf8Len
+    Numero de colunas visiveis de uma string UTF-8. Len()/SubStr() nesta
+    runtime operam sobre bytes (confirmado no fonte do compilador), entao
+    qualquer acento (á, ç, ã...) inflava a contagem e furava o padding das
+    caixas. Conta 1 por sequencia UTF-8 (byte que nao e continuation byte
+    10xxxxxx), o que cobre letras latinas acentuadas.
+    ponytail: emoji/CJK largos contam como 1 coluna aqui (ceiling); tratar
+    largura dupla se a UI passar a exibir esse tipo de conteudo.
+@type function
+/*/
+Static Function Utf8Len(cText)
+    Local nBytes := Len(cText)
+    Local nChars := 0
+    Local i := 1
+    Local nByte
+
+    While i <= nBytes
+        nByte := Asc(SubStr(cText, i, 1))
+        If nByte >= 240
+            i += 4
+        ElseIf nByte >= 224
+            i += 3
+        ElseIf nByte >= 192
+            i += 2
+        Else
+            i += 1
+        EndIf
+        nChars++
+    End
+Return nChars
 
 /*/{Protheus.doc} WordWrap
     Quebra texto em linhas de tamanho maximo, respeitando palavras
@@ -239,17 +288,74 @@ Return aLines
 @type function
 /*/
 Static Function ShowBBSHeader(cEsc, nWidth)
-    Local cArt := cEsc + "[1;33m" + ;
-        " ╔" + Replicate("═", nWidth - 2) + "╗" + Chr(10) + ;
-        " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ║" + PadCenter("SHORTCODER", nWidth - 2) + "║" + Chr(10) + ;
-        " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ║" + PadCenter("[AI Coding Agent v1.0]", nWidth - 2) + "║" + Chr(10) + ;
-        " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ╚" + Replicate("═", nWidth - 2) + "╝" + cEsc + "[0m"
-    
-    ConOut(cArt)
+    Local nInner   := nWidth - 2
+    Local cWord    := "SHORTCODER"
+    Local nLogoW   := Len(cWord) * 6 - 1
+    Local nPad     := 0
+    Local aLetters := {}
+    Local aGlyph
+    Local cRow
+    Local i, r
+
+    ConOut(cEsc + "[1;33m ╔" + Replicate("═", nInner) + "╗" + cEsc + "[0m")
+    ConOut(cEsc + "[1;33m ║" + cEsc + "[0;34m" + Replicate("░", nInner) + cEsc + "[1;33m" + "║" + cEsc + "[0m")
+    ConOut(cEsc + "[1;33m ║" + cEsc + "[1;34m" + Replicate("▒", nInner) + cEsc + "[1;33m" + "║" + cEsc + "[0m")
+
+    If nInner >= nLogoW
+        For i := 1 To Len(cWord)
+            aAdd(aLetters, BigFont(SubStr(cWord, i, 1)))
+        Next i
+        nPad := Int((nInner - nLogoW) / 2)
+        For r := 1 To 5
+            cRow := ""
+            For i := 1 To Len(aLetters)
+                aGlyph := aLetters[i]
+                cRow += StrTran(StrTran(aGlyph[r], "#", "█"), ".", " ")
+                If i < Len(aLetters)
+                    cRow += " "
+                EndIf
+            Next i
+            ConOut(cEsc + "[1;33m ║" + Replicate(" ", nPad) + cEsc + "[1;36m" + cRow + cEsc + "[1;33m" + Replicate(" ", nInner - nPad - nLogoW) + "║" + cEsc + "[0m")
+        Next r
+    Else
+        ConOut(cEsc + "[1;33m ║" + cEsc + "[1;36m" + PadCenter("SHORTCODER", nInner) + cEsc + "[1;33m" + "║" + cEsc + "[0m")
+    EndIf
+
+    ConOut(cEsc + "[1;33m ║" + cEsc + "[1;34m" + Replicate("▒", nInner) + cEsc + "[1;33m" + "║" + cEsc + "[0m")
+    ConOut(cEsc + "[1;33m ║" + cEsc + "[0;34m" + Replicate("░", nInner) + cEsc + "[1;33m" + "║" + cEsc + "[0m")
+    ConOut(cEsc + "[1;33m ║" + PadCenter("[AI Coding Agent v1.0]", nInner) + "║" + cEsc + "[0m")
+    ConOut(cEsc + "[1;33m ╚" + Replicate("═", nInner) + "╝" + cEsc + "[0m")
 Return Nil
+
+/*/{Protheus.doc} BigFont
+    Retorna a matriz 5x5 (linhas de '#'/'.') do glifo em bloco de uma letra,
+    no estilo logo ANSI-art classico (TheDraw / figlet block font).
+@type function
+/*/
+Static Function BigFont(cChar)
+    Local aRows := {}
+
+    Do Case
+    Case cChar == "S"
+        aRows := {"#####", "#....", "#####", "....#", "#####"}
+    Case cChar == "H"
+        aRows := {"#...#", "#...#", "#####", "#...#", "#...#"}
+    Case cChar == "O"
+        aRows := {"#####", "#...#", "#...#", "#...#", "#####"}
+    Case cChar == "R"
+        aRows := {"#####", "#...#", "#####", "#..#.", "#...#"}
+    Case cChar == "T"
+        aRows := {"#####", "..#..", "..#..", "..#..", "..#.."}
+    Case cChar == "C"
+        aRows := {"#####", "#....", "#....", "#....", "#####"}
+    Case cChar == "D"
+        aRows := {"####.", "#...#", "#...#", "#...#", "####."}
+    Case cChar == "E"
+        aRows := {"#####", "#....", "#####", "#....", "#####"}
+    OtherWise
+        aRows := {".....", ".....", ".....", ".....", "....."}
+    EndCase
+Return aRows
 
 /*/{Protheus.doc} PadCenter
     Centraliza texto em espaco dado
@@ -270,66 +376,146 @@ Return Replicate(" ", nLeft) + cText + Replicate(" ", nPad - nLeft)
 @type function
 /*/
 Static Function ShowStatus(cEsc, cModel, cSession, cAgent, cMemUser, nWidth)
-    Local cLine1, cLine2, cLine3, cLine4
-    
-    cLine1 := " │ MODEL:  [" + cEsc + "[1;33m" + Left(cModel, 30) + cEsc + "[36m" + "]                   │"
-    cLine2 := " │ SESSION:[0m" + cEsc + "[1;33m" + Left(cSession, 30) + cEsc + "[36m" + "]                   │"
-    cLine3 := " │ AGENT:  [" + cEsc + "[1;33m" + Upper(cAgent) + cEsc + "[36m" + "]                          │"
-    cLine4 := " │ MEM0:   [" + cEsc + "[1;33m" + cMemUser + cEsc + "[36m" + "]                            │"
-    
+    Local nInner := nWidth - 2
+    Local cLine1 := StatusLine(cEsc, "MODEL",   cModel,        nInner, "1;33")
+    Local cLine2 := StatusLine(cEsc, "SESSION", cSession,      nInner, "1;32")
+    Local cLine3 := StatusLine(cEsc, "AGENT",   Upper(cAgent), nInner, "1;35")
+    Local cLine4 := StatusLine(cEsc, "MEM0",    cMemUser,      nInner, "1;33")
+
     ConOut(cEsc + "[2;36m" + ;
-        " ┌" + Replicate("─", nWidth - 2) + "┐" + Chr(10) + ;
+        " ┌" + Replicate("─", nInner) + "┐" + Chr(10) + ;
         cLine1 + Chr(10) + ;
         cLine2 + Chr(10) + ;
         cLine3 + Chr(10) + ;
         cLine4 + Chr(10) + ;
-        " └" + Replicate("─", nWidth - 2) + "┘" + cEsc + "[0m")
+        " └" + Replicate("─", nInner) + "┘" + cEsc + "[0m")
 Return Nil
 
+/*/{Protheus.doc} StatusLine
+    Monta uma linha do painel de status com largura fixa em nInner,
+    para a borda direita alinhar independente do tamanho do valor.
+@type function
+/*/
+Static Function StatusLine(cEsc, cLabel, cValue, nInner, cColor)
+    Local cHead  := " " + PadR(cLabel + ":", 9) + " ["
+    Local nAvail := Max(0, nInner - Len(cHead) - 1)
+    Local cVal   := Left(cValue, nAvail)
+    Local nPad   := nAvail - Len(cVal)
+
+Return " │" + cHead + cEsc + "[" + cColor + "m" + cVal + cEsc + "[36m" + "]" + Replicate(" ", nPad) + "│"
+
+/*/{Protheus.doc} BoxTop / BoxDiv / BoxBottom
+    Bordas de caixa em box-drawing Unicode (estilo ANSI art classico),
+    substituindo o antigo "+---+" ASCII usado nas telas legadas.
+@type function
+/*/
+Static Function BoxTop(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m ┌" + Replicate("─", nInner) + "┐" + cEsc + "[0m"
+
+Static Function BoxDiv(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m ├" + Replicate("─", nInner) + "┤" + cEsc + "[0m"
+
+Static Function BoxBottom(cEsc, nInner, cColor)
+Return cEsc + "[" + cColor + "m └" + Replicate("─", nInner) + "┘" + cEsc + "[0m"
+
+/*/{Protheus.doc} BoxLine
+    Monta uma linha de conteudo com largura fixa em nInner, calculada a
+    partir do comprimento VISIVEL (nVisLen), para a borda direita alinhar
+    sempre, independente de quanto texto/cor o chamador colocou dentro.
+@type function
+/*/
+Static Function BoxLine(cEsc, cContent, nVisLen, nInner, cColor)
+    Local nPad := Max(0, nInner - nVisLen)
+Return cEsc + "[" + cColor + "m │" + cEsc + "[0m" + cContent + Replicate(" ", nPad) + cEsc + "[" + cColor + "m│" + cEsc + "[0m"
+
+/*/{Protheus.doc} BoxLineAuto
+    Como BoxLine, mas calcula o comprimento visivel automaticamente via
+    StripANSI. Uso restrito a mensagens curtas de status/erro, cujo
+    tamanho o chamador ja garante caber em nInner (nao ha truncagem segura
+    de texto colorido).
+@type function
+/*/
+Static Function BoxLineAuto(cEsc, cColoredText, nInner, cColor)
+    Local nVis := Utf8Len(StripANSI(cEsc, cColoredText)) + 1
+Return BoxLine(cEsc, " " + cColoredText, nVis, nInner, cColor)
+
+/*/{Protheus.doc} BoxTitle
+    Linha de titulo centralizada dentro da caixa.
+@type function
+/*/
+Static Function BoxTitle(cEsc, cText, nInner, cBorderColor, cTextColor)
+Return cEsc + "[" + cBorderColor + "m │" + cEsc + "[" + cTextColor + "m" + PadCenter(cText, nInner) + cEsc + "[" + cBorderColor + "m│" + cEsc + "[0m"
+
+/*/{Protheus.doc} BoxBlank
+    Linha em branco dentro da caixa (preenche com espacos ate a borda).
+@type function
+/*/
+Static Function BoxBlank(cEsc, nInner, cColor)
+Return BoxLine(cEsc, "", 0, nInner, cColor)
+
+/*/{Protheus.doc} BoxSection
+    Linha de cabecalho de secao (texto em negrito) dentro da caixa.
+@type function
+/*/
+Static Function BoxSection(cEsc, cText, nInner, cColor)
+    Local cPlain := " " + cText
+Return BoxLine(cEsc, " " + cEsc + "[1m" + cText + cEsc + "[0m", Len(cPlain), nInner, cColor)
+
+/*/{Protheus.doc} BoxCmdLine
+    Linha "  /comando   - descricao" dentro da caixa, com o comando
+    alinhado em coluna fixa (PadR) independente do tamanho da descricao.
+@type function
+/*/
+Static Function BoxCmdLine(cEsc, cCmd, cDesc, nInner, cColor)
+    Local cPlain   := "   " + PadR(cCmd, 16) + "- " + cDesc
+    Local cContent := "   " + cEsc + "[1;37m" + PadR(cCmd, 16) + cEsc + "[0m" + cEsc + "[2;37m" + "- " + cDesc + cEsc + "[0m"
+Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cColor)
+
 Static Function ShowBBSHelp(cEsc, nWidth)
-    Local nBoxW := nWidth - 2
-    
+    Local nInner := nWidth - 2
+
     ConOut("")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m|" + PadCenter("[ COMMAND LIST ]", nBoxW) + "|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m " + cEsc + "[1mAGENTES:" + cEsc + "[0m" + Replicate(" ", nBoxW - 12) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /agent          - Switch agent (ollama/mem0/ernesto)" + Replicate(" ", Max(0, nBoxW - 58)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /model          - List & select model" + Replicate(" ", Max(0, nBoxW - 48)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m " + Replicate(" ", nBoxW) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m " + cEsc + "[1mMEMORIA PERSISTENTE:" + cEsc + "[0m" + Replicate(" ", Max(0, nBoxW - 32)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /mem0 list      - View saved memories" + Replicate(" ", Max(0, nBoxW - 48)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /mem0 add <txt> - Save a memory" + Replicate(" ", Max(0, nBoxW - 40)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /mem0 clear     - Remove all memories" + Replicate(" ", Max(0, nBoxW - 48)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m " + Replicate(" ", nBoxW) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m " + cEsc + "[1mOUTROS:" + cEsc + "[0m" + Replicate(" ", nBoxW - 9) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /clear   - New session (clear history)" + Replicate(" ", Max(0, nBoxW - 50)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /history - View conversation history" + Replicate(" ", Max(0, nBoxW - 48)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /help    - This help screen" + Replicate(" ", Max(0, nBoxW - 38)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[2;37m|" + cEsc + "[0m   /exit    - Disconnect" + Replicate(" ", Max(0, nBoxW - 30)) + cEsc + "[2m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    ConOut(BoxTitle(cEsc, "[ COMMAND LIST ]", nInner, "1;33", "1;33"))
+    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxSection(cEsc, "AGENTES:", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/agent", "Switch agent (ollama/mem0/ernesto)", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/model", "List & select model", nInner, "1;33"))
+    ConOut(BoxBlank(cEsc, nInner, "1;33"))
+    ConOut(BoxSection(cEsc, "MEMORIA PERSISTENTE:", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/mem0 list", "View saved memories", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/mem0 add <txt>", "Save a memory", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/mem0 clear", "Remove all memories", nInner, "1;33"))
+    ConOut(BoxBlank(cEsc, nInner, "1;33"))
+    ConOut(BoxSection(cEsc, "OUTROS:", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/clear", "New session (clear history)", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/history", "View conversation history", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/help", "This help screen", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/exit", "Disconnect", nInner, "1;33"))
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
     ConOut("")
 Return Nil
 
 /*/{Protheus.doc} PickAgent
 @type function
 /*/
-Static Function PickAgent(cEsc, cCurrent)
+Static Function PickAgent(cEsc, cCurrent, nWidth)
+    Local nInner := Min(nWidth - 2, 58)
     Local cChoice
-    
+
     ConOut("")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", 40) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m|" + PadCenter("[ SELECT AGENT ]", 40) + "|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", 40) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[2m  [1]" + cEsc + "[0m ollama  — Fast LLM (lfm25, ~1s response)")
-    ConOut(cEsc + "[2m  [2]" + cEsc + "[0m mem0    — Persistent memory queries")
-    ConOut(cEsc + "[2m  [3]" + cEsc + "[0m ernesto — RAG + Memory (slow, >30s)")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", 40) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    ConOut(BoxTitle(cEsc, "[ SELECT AGENT ]", nInner, "1;33", "1;33"))
+    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(BoxOptionLine(cEsc, "1", "1;36", "ollama",  "Fast LLM (lfm25, ~1s response)",  nInner, "1;33"))
+    ConOut(BoxOptionLine(cEsc, "2", "1;32", "mem0",    "Persistent memory queries",       nInner, "1;33"))
+    ConOut(BoxOptionLine(cEsc, "3", "1;35", "ernesto", "RAG + Memory (slow, >30s)",       nInner, "1;33"))
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
     ConOut("")
-    
+
     cChoice := AllTrim(ConIn("Select agent [1-3] (Enter=" + cCurrent + "): "))
     ConOut("")
-    
+
     If cChoice == "1"
         Return "ollama"
     ElseIf cChoice == "2"
@@ -339,27 +525,42 @@ Static Function PickAgent(cEsc, cCurrent)
     EndIf
 Return cCurrent
 
+/*/{Protheus.doc} BoxOptionLine
+    Linha "  [n] nome  - descricao" usada nos menus de selecao (agente,
+    modelo), com o nome colorido e alinhado em coluna fixa.
+@type function
+/*/
+Static Function BoxOptionLine(cEsc, cNum, cNameColor, cName, cDesc, nInner, cBorderColor)
+    Local cPlain   := "  [" + cNum + "] " + PadR(cName, 9) + "- " + cDesc
+    Local cContent := "  " + cEsc + "[2m[" + cNum + "]" + cEsc + "[0m " + cEsc + "[" + cNameColor + "m" + PadR(cName, 9) + cEsc + "[0m" + cEsc + "[2m- " + cDesc + cEsc + "[0m"
+Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cBorderColor)
+
 /*/{Protheus.doc} PickModel
 @type function
 /*/
 Static Function PickModel(cEsc, aModels, cCurrent, nWidth)
-    Local i, cChoice, nIdx, nBoxW := 50
-    
+    Local i, cChoice, nIdx
+    Local nInner := Min(nWidth - 2, 70)
+    Local cName, cPlain, cContent
+
     If Len(aModels) == 0
         ConOut(cEsc + "[33m[WARN] No models found — keeping " + cCurrent + cEsc + "[0m")
         Return cCurrent
     EndIf
-    
+
     ConOut("")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m|" + PadCenter("[ MODEL SELECT ]", nBoxW) + "|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    ConOut(BoxTitle(cEsc, "[ MODEL SELECT ]", nInner, "1;33", "1;33"))
+    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+
     For i := 1 To Min(Len(aModels), 20)
-        ConOut(cEsc + "[2m  [" + StrZero(i, 2) + "]" + cEsc + "[0m " + Left(aModels[i][1], nBoxW - 8))
+        cName    := Left(aModels[i][1], Max(0, nInner - 8))
+        cPlain   := "  [" + StrZero(i, 2) + "] " + cName
+        cContent := "  " + cEsc + "[2m[" + StrZero(i, 2) + "]" + cEsc + "[0m " + cName
+        ConOut(BoxLine(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
     Next i
-    
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
     ConOut("")
     
     cChoice := AllTrim(ConIn("Select model [1-" + Str(Len(aModels)) + "] or type name: "))
@@ -383,7 +584,7 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     Local nStart
     Local nStatus
     Local cBody, oJ, oChoice
-    Local nBoxW := nWidth - 2
+    Local nInner := nWidth - 2
 
     nStart := Seconds()
     cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
@@ -393,9 +594,9 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     If nStatus != 200
         Local cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
-            cResponse := cEsc + "[1;33m[TIMEOUT] Model too slow (load >30s) — try /agent 1 for fast LLM" + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Model too slow (load >30s) — try /agent 1 for fast LLM" + cEsc + "[0m", nInner, "1;36")
         Else
-            cResponse := cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;36")
         EndIf
     Else
         cBody := FWHTTPBODY()
@@ -406,52 +607,57 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
                 Local cContent := AllTrim(oChoice["message"]["content"])
                 Local cReasoning := AllTrim(oChoice["message"]["reasoning"])
                 If !Empty(cContent)
-                    cResponse := FormatTextForBox(cEsc, cContent, nWidth - 4, nWidth - 2)
+                    cResponse := FormatTextForBox(cEsc, cContent, nInner, "1;36")
                 ElseIf !Empty(cReasoning)
-                    cResponse := FormatTextForBox(cEsc, cReasoning, nWidth - 4, nWidth - 2)
+                    cResponse := FormatTextForBox(cEsc, cReasoning, nInner, "1;36")
                 Else
-                    cResponse := cEsc + "[2m[NO CONTENT]" + cEsc + "[0m"
+                    cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO CONTENT]" + cEsc + "[0m", nInner, "1;36")
                 EndIf
             Else
-                cResponse := cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m"
+                cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m", nInner, "1;36")
             EndIf
         Else
-            cResponse := cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m", nInner, "1;36")
         EndIf
     EndIf
 
     ConOut("")
-    ConOut(cEsc + "[1;36m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;36m|" + cEsc + "[1;33m AGENT:OLLAMA " + cEsc + "[36m" + cEsc + "[2m" + cModel + Replicate(" ", Max(0, nBoxW - 22 - Len(cModel))) + " " + cEsc + "[1;36m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;36m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;36"))
+    ConOut(BoxAgentTitle(cEsc, "AGENT:OLLAMA", cModel, nInner, "1;36"))
+    ConOut(BoxDiv(cEsc, nInner, "1;36"))
     ConOut(cResponse)
-    ConOut(cEsc + "[1;36m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;36"))
     ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s response time" + cEsc + "[0m")
     ConOut("")
 
     aAdd(aHistory, {"ollama", cPrompt, Seconds() - nStart})
 Return Nil
 
-/*/{Protheus.doc} FormatTextForBox
-    Formata texto para caber dentro de caixa BBS
+/*/{Protheus.doc} BoxAgentTitle
+    Linha de titulo das caixas de resposta de agente: " AGENT:X  subtitulo".
 @type function
 /*/
-Static Function FormatTextForBox(cEsc, cText, nMaxLen, nBoxW)
-    Local aLines, cLine, cResult := "", i, nLen, cStripped
-    
+Static Function BoxAgentTitle(cEsc, cLabel, cSub, nInner, cColor)
+    Local cPlain   := " " + cLabel + " " + cSub
+    Local cContent := " " + cEsc + "[1;33m" + cLabel + cEsc + "[0m" + " " + cEsc + "[2m" + cSub + cEsc + "[0m"
+Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cColor)
+
+/*/{Protheus.doc} FormatTextForBox
+    Formata texto em linhas com borda │...│ dentro de nInner, quebrando
+    palavras (WordWrap) — mesma tecnica das demais caixas do app.
+@type function
+/*/
+Static Function FormatTextForBox(cEsc, cText, nInner, cColor)
+    Local aLines, cLine, cResult := "", i
+    Local nMaxLen := Max(1, nInner - 2)
+
     aLines := WordWrap(cText, nMaxLen)
-    
+
     For i := 1 To Len(aLines)
-        cLine := aLines[i]
-        nLen := Len(cLine)
-        
-        If nLen >= nMaxLen
-            cResult := cResult + cEsc + "[2;37m" + Left(cLine, nMaxLen) + cEsc + "[0m" + Chr(10)
-        Else
-            cResult := cResult + cEsc + "[2;37m" + cLine + Replicate(" ", nMaxLen - nLen) + cEsc + "[0m" + Chr(10)
-        EndIf
+        cLine := " " + aLines[i]
+        cResult := cResult + BoxLine(cEsc, cEsc + "[2;37m" + cLine + cEsc + "[0m", Utf8Len(cLine), nInner, cColor) + Chr(10)
     Next i
-    
+
 Return cResult
 
 /*/{Protheus.doc} RunMem0Agent
@@ -463,15 +669,15 @@ Static Function RunMem0Agent(cEsc, cUserId, nWidth, aHistory)
     Local nStatus
     Local cBody
     Local oJ, aMemories, oMem
-    Local i, cContent, cCat, cConf
+    Local i, cContent, cCat, cConf, cItem
     Local nCount := 0
-    Local nBoxW := nWidth - 2
+    Local nInner := nWidth - 2
 
     nStart := Seconds()
     nStatus := FWHTTPGET("http://127.0.0.1:9081/memories/" + cUserId)
 
     If nStatus != 200
-        cResponse := cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — mem0 unavailable" + cEsc + "[0m"
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — mem0 unavailable" + cEsc + "[0m", nInner, "1;32")
     Else
         cBody := FWHTTPBODY()
         oJ := JsonObject():New()
@@ -486,35 +692,36 @@ Static Function RunMem0Agent(cEsc, cUserId, nWidth, aHistory)
                         cCat := oMem["metadata"]["category"]
                         cConf := AllTrim(Str(oMem["metadata"]["confidence"], 5, 2))
                         If !Empty(cContent)
+                            Local cPrefix := "[" + cCat + "] conf:" + cConf + " "
+                            Local nAvail  := Max(1, nInner - Utf8Len(cPrefix) - 1)
                             nCount++
-                            cResponse := cResponse + cEsc + "[2m[" + cCat + "] conf:" + cConf + cEsc + "[0m "
-                            cResponse := cResponse + Left(cContent, 100)
-                            If Len(cContent) > 100
-                                cResponse := cResponse + "..."
+                            cItem := Left(cContent, nAvail)
+                            If Len(cContent) > Len(cItem)
+                                cItem := Left(cItem, Max(0, Len(cItem) - 3)) + "..."
                             EndIf
-                            cResponse := cResponse + Chr(10)
+                            cResponse := cResponse + BoxLineAuto(cEsc, cEsc + "[2m" + cPrefix + cEsc + "[0m" + cItem, nInner, "1;32") + Chr(10)
                         EndIf
                     EndIf
                 Next i
                 If nCount == 0
-                    cResponse := cEsc + "[2m[NO MEMORIES]" + cEsc + "[0m"
+                    cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO MEMORIES]" + cEsc + "[0m", nInner, "1;32")
                 Else
-                    cResponse := cEsc + "[2m--- " + AllTrim(Str(nCount)) + " of " + AllTrim(Str(Len(aMemories))) + " memories shown ---" + cEsc + "[0m" + Chr(10) + cResponse
+                    cResponse := BoxLineAuto(cEsc, cEsc + "[2m--- " + AllTrim(Str(nCount)) + " of " + AllTrim(Str(Len(aMemories))) + " memories shown ---" + cEsc + "[0m", nInner, "1;32") + Chr(10) + cResponse
                 EndIf
             Else
-                cResponse := cEsc + "[2m[NO MEMORIES]" + cEsc + "[0m"
+                cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO MEMORIES]" + cEsc + "[0m", nInner, "1;32")
             EndIf
         Else
-            cResponse := cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m", nInner, "1;32")
         EndIf
     EndIf
 
     ConOut("")
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;32m|" + cEsc + "[1;33m AGENT:MEM0   " + cEsc + "[32m" + cEsc + "[2mPersistent Memory Store" + Replicate(" ", Max(0, nBoxW - 35)) + " " + cEsc + "[1;32m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;32"))
+    ConOut(BoxAgentTitle(cEsc, "AGENT:MEM0", "Persistent Memory Store", nInner, "1;32"))
+    ConOut(BoxDiv(cEsc, nInner, "1;32"))
     ConOut(cResponse)
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;32"))
     ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s · " + AllTrim(Str(nCount)) + " results" + cEsc + "[0m")
     ConOut("")
 
@@ -529,7 +736,7 @@ Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     Local nStart
     Local nStatus
     Local cBody, oJ, oChoice
-    Local nBoxW := nWidth - 2
+    Local nInner := nWidth - 2
 
     nStart := Seconds()
     cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
@@ -539,9 +746,9 @@ Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     If nStatus != 200
         Local cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
-            cResponse := cEsc + "[1;33m[TIMEOUT] RAG pipeline slow (>30s) — use ollama agent for fast responses" + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] RAG pipeline slow (>30s) — use ollama agent for fast responses" + cEsc + "[0m", nInner, "1;35")
         Else
-            cResponse := cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;35")
         EndIf
     Else
         cBody := FWHTTPBODY()
@@ -549,21 +756,21 @@ Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
         If oJ:FromJson(cBody)
             oChoice := oJ["choices"][1]
             If ValType(oChoice) == "O"
-                cResponse := FormatTextForBox(cEsc, AllTrim(oChoice["message"]["content"]), nWidth - 4, nBoxW)
+                cResponse := FormatTextForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;35")
             Else
-                cResponse := cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m"
+                cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m", nInner, "1;35")
             EndIf
         Else
-            cResponse := cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m"
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m", nInner, "1;35")
         EndIf
     EndIf
 
     ConOut("")
-    ConOut(cEsc + "[1;35m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;35m|" + cEsc + "[1;33m AGENT:ERNESO " + cEsc + "[35m" + cEsc + "[2mRAG + Memory Integrated" + Replicate(" ", Max(0, nBoxW - 35)) + " " + cEsc + "[1;35m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;35m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;35"))
+    ConOut(BoxAgentTitle(cEsc, "AGENT:ERNESTO", "RAG + Memory Integrated", nInner, "1;35"))
+    ConOut(BoxDiv(cEsc, nInner, "1;35"))
     ConOut(cResponse)
-    ConOut(cEsc + "[1;35m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;35"))
     ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s response time" + cEsc + "[0m")
     ConOut("")
 
@@ -576,20 +783,20 @@ Return Nil
 Static Function RunMem0Add(cEsc, cUserId, cContent, nWidth, aHistory)
     Local nStatus
     Local nStart := Seconds()
-    Local nBoxW := nWidth - 2
+    Local nInner := nWidth - 2
 
     nStatus := FWHTTPPOST("http://127.0.0.1:9081/memories/" + cUserId, ;
         '{"content":"' + JsonEscape(cContent) + '"}', ;
         "application/json")
 
     ConOut("")
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;32"))
     If nStatus == 200
-        ConOut(cEsc + "[1;32m|" + cEsc + "[32m[OK]      " + cEsc + "[37mMemory saved successfully" + Replicate(" ", Max(0, nBoxW - 35)) + " " + cEsc + "[1;32m|" + cEsc + "[0m")
+        ConOut(BoxLineAuto(cEsc, cEsc + "[32m[OK]" + cEsc + "[0m " + cEsc + "[37mMemory saved successfully" + cEsc + "[0m", nInner, "1;32"))
     Else
-        ConOut(cEsc + "[1;32m|" + cEsc + "[31m[ERROR]   " + cEsc + "[37mHTTP " + AllTrim(Str(nStatus)) + " — could not save memory" + Replicate(" ", Max(0, nBoxW - 45)) + " " + cEsc + "[1;32m|" + cEsc + "[0m")
+        ConOut(BoxLineAuto(cEsc, cEsc + "[31m[ERROR]" + cEsc + "[0m " + cEsc + "[37mHTTP " + AllTrim(Str(nStatus)) + " — could not save memory" + cEsc + "[0m", nInner, "1;32"))
     EndIf
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;32"))
     ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s" + cEsc + "[0m")
     ConOut("")
 
@@ -609,18 +816,18 @@ Return Nil
 Static Function RunMem0Clear(cEsc, cUserId, nWidth, aHistory)
     Local nStatus
     Local nStart := Seconds()
-    Local nBoxW := nWidth - 2
+    Local nInner := nWidth - 2
 
     nStatus := FWHTTPDELETE("http://127.0.0.1:9081/memories/" + cUserId)
 
     ConOut("")
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;32"))
     If nStatus == 200
-        ConOut(cEsc + "[1;32m|" + cEsc + "[32m[OK]      " + cEsc + "[37mAll memories cleared" + Replicate(" ", Max(0, nBoxW - 30)) + " " + cEsc + "[1;32m|" + cEsc + "[0m")
+        ConOut(BoxLineAuto(cEsc, cEsc + "[32m[OK]" + cEsc + "[0m " + cEsc + "[37mAll memories cleared" + cEsc + "[0m", nInner, "1;32"))
     Else
-        ConOut(cEsc + "[1;32m|" + cEsc + "[31m[ERROR]   " + cEsc + "[37mHTTP " + AllTrim(Str(nStatus)) + " — could not clear" + Replicate(" ", Max(0, nBoxW - 38)) + " " + cEsc + "[1;32m|" + cEsc + "[0m")
+        ConOut(BoxLineAuto(cEsc, cEsc + "[31m[ERROR]" + cEsc + "[0m " + cEsc + "[37mHTTP " + AllTrim(Str(nStatus)) + " — could not clear" + cEsc + "[0m", nInner, "1;32"))
     EndIf
-    ConOut(cEsc + "[1;32m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;32"))
     ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s" + cEsc + "[0m")
     ConOut("")
 
@@ -666,40 +873,44 @@ Return cDefaultAgent
 @type function
 /*/
 Static Function ShowUserMessage(cEsc, cMsg, nWidth)
-    Local nBoxW := nWidth - 2
-    Local aLines, cLine, i
-    
+    Local nInner := nWidth - 2
+    Local cText, cPlain, cContent
+
     ConOut("")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m|" + cEsc + "[1;37m USER     " + cEsc + "[33m" + cEsc + "[2m" + Left(cMsg, nBoxW - 14) + Replicate(" ", Max(0, nBoxW - 14 - Len(cMsg))) + " " + cEsc + "[1;33m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    cText    := Left(cMsg, Max(0, nInner - 8))
+    cPlain   := " USER  " + cText
+    cContent := " " + cEsc + "[1;37mUSER " + cEsc + "[0m " + cEsc + "[2;33m" + cText + cEsc + "[0m"
+    ConOut(BoxLine(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
 Return Nil
 
 /*/{Protheus.doc} ShowHistory
 @type function
 /*/
 Static Function ShowHistory(cEsc, aHistory, nWidth)
-    Local nBoxW := nWidth - 2
-    Local i, cLine
-    
+    Local nInner := nWidth - 2
+    Local i, cPlain, cContent, cAgent, cSecs, cMsg
+
     ConOut("")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m|" + cEsc + "[1;37m HISTORY   " + Replicate(" ", Max(0, nBoxW - 14)) + " " + cEsc + "[1;33m|" + cEsc + "[0m")
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    ConOut(BoxSection(cEsc, "HISTORY", nInner, "1;33"))
+    ConOut(BoxDiv(cEsc, nInner, "1;33"))
 
     If Len(aHistory) == 0
-        ConOut(cEsc + "[2m  [EMPTY] No conversation history" + cEsc + "[0m")
+        ConOut(BoxLineAuto(cEsc, cEsc + "[2m[EMPTY] No conversation history" + cEsc + "[0m", nInner, "1;33"))
     Else
         For i := 1 To Len(aHistory)
-            cLine := cEsc + "[2m  [" + StrZero(i, 3) + "]" + cEsc + "[0m "
-            cLine := cLine + cEsc + "[1m" + aHistory[i][1] + cEsc + "[0m "
-            cLine := cLine + cEsc + "[2m(" + AllTrim(Str(aHistory[i][3], 5, 1)) + "s)" + cEsc + "[0m"
-            cLine := cLine + " " + Left(aHistory[i][2], nBoxW - 25)
-            ConOut(cLine)
+            cAgent   := aHistory[i][1]
+            cSecs    := "(" + AllTrim(Str(aHistory[i][3], 5, 1)) + "s)"
+            cMsg     := Left(aHistory[i][2], Max(0, nInner - 12 - Len(cAgent) - Len(cSecs)))
+            cPlain   := "  [" + StrZero(i, 3) + "] " + cAgent + " " + cSecs + " " + cMsg
+            cContent := "  " + cEsc + "[2m[" + StrZero(i, 3) + "]" + cEsc + "[0m " + cEsc + "[1m" + cAgent + cEsc + "[0m " + cEsc + "[2m" + cSecs + cEsc + "[0m " + cMsg
+            ConOut(BoxLine(cEsc, cContent, Utf8Len(cPlain), nInner, "1;33"))
         Next i
     EndIf
 
-    ConOut(cEsc + "[1;33m+" + Replicate("─", nBoxW) + "+" + cEsc + "[0m")
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
     ConOut("")
 Return Nil
 
