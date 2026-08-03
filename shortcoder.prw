@@ -24,6 +24,7 @@ User Function Main()
     Local cAgent    := "ollama"
     Local cMemUser  := "default"
     Local aHistory  := {}
+    Local cSelectedAgent
 
     LoadModels(cModelsJs, @aModels, @cDefModel)
     cModel := cDefModel
@@ -78,7 +79,7 @@ User Function Main()
             ShowUserMessage(cEsc, cInput, nWidth)
             
             // ORQUESTRACAO: Decide qual agente usar baseado no conteudo
-            Local cSelectedAgent := DetectAgent(cInput, cAgent)
+            cSelectedAgent := DetectAgent(cInput, cAgent)
             
             If cSelectedAgent == "mem0"
                 RunMem0Agent(cEsc, cMemUser, nWidth, @aHistory)
@@ -100,6 +101,18 @@ Return
 Static Function NewSessionId()
 Return "user-" + DToS(Date()) + "-" + StrTran(Str(Seconds(), 12, 3), ".", "")
 
+/*/{Protheus.doc} JsonEscape
+    Escapa uma string para uso segura dentro de um valor JSON
+@type function
+/*/
+Static Function JsonEscape(cText)
+    Local cResult := cText
+    cResult := StrTran(cResult, "\", "\\")
+    cResult := StrTran(cResult, Chr(34), '\"')
+    cResult := StrTran(cResult, Chr(10), "\n")
+    cResult := StrTran(cResult, Chr(13), "")
+Return cResult
+
 /*/{Protheus.doc} LoadModels
 @type function
 /*/
@@ -107,7 +120,7 @@ Static Function LoadModels(cPath, aModels, cDefModel)
     Local cJson := MemoRead(cPath)
     Local oRoot := JsonObject():New()
     Local aProvNames, cProv, oProv, aProvModels, oModel
-    Local i, j
+    Local i, j, nIdx, cId
 
     If Empty(cJson) .Or. !oRoot:FromJson(cJson)
         Return Nil
@@ -115,7 +128,7 @@ Static Function LoadModels(cPath, aModels, cDefModel)
 
     If ValType(oRoot["default"]) == "C" .And. !Empty(oRoot["default"])
         cDefModel := oRoot["default"]
-        Local nIdx := At("/", cDefModel)
+        nIdx := At("/", cDefModel)
         If nIdx > 0
             cDefModel := SubStr(cDefModel, nIdx + 1)
         EndIf
@@ -136,7 +149,7 @@ Static Function LoadModels(cPath, aModels, cDefModel)
         For j := 1 To Len(aProvModels)
             oModel := aProvModels[j]
             If ValType(oModel["id"]) == "C"
-                Local cId := oModel["id"]
+                cId := oModel["id"]
                 If At("/", cId) > 0
                     cId := SubStr(cId, At("/", cId) + 1)
                 EndIf
@@ -156,10 +169,10 @@ Return Nil
     Remove sequencias ANSI de uma string e devolve o texto puro
 @type function
 /*/
-Static Function StripANSI(cText)
+Static Function StripANSI(cEsc, cText)
     Local cResult := cText
-    Local nIdx, nLen
-    
+    Local nIdx
+
     // Remove codes como [1;33m, [0m, etc
     Do While At(cEsc + "[", cResult) > 0
         nIdx := At(cEsc + "[", cResult)
@@ -179,19 +192,20 @@ Return cResult
 /*/
 Static Function WordWrap(cText, nMaxLen)
     Local aLines := {}
-    Local cWord, cLine := "", nWordLen, nLineLen
-    Local aWords, i
-    
+    Local aWords := {}
+    Local cWord := ""
+    Local cLine := ""
+    Local cChar
+    Local nWordLen, nLineLen, nSep
+    Local nLen, i
+
     cText := StrTran(cText, Chr(10), " ")
     cText := StrTran(cText, Chr(13), " ")
     // Manual tokenization since StrTokArray doesn't exist
-    aWords := {}
-    cText := StrTran(cText, " ", Chr(1))  // temporary separator
-    cText := StrTran(cText, Chr(1) + Chr(1), " ")  // preserve double spaces
-    Local cWord := "", nLen := Len(cText), i
-    
+    nLen := Len(cText)
+
     For i := 1 To nLen
-        Local cChar := SubStr(cText, i, 1)
+        cChar := SubStr(cText, i, 1)
         If cChar == " " .And. !Empty(cWord)
             aAdd(aWords, cWord)
             cWord := ""
@@ -199,17 +213,22 @@ Static Function WordWrap(cText, nMaxLen)
             cWord := cWord + cChar
         EndIf
     Next i
-    
+
     If !Empty(cWord)
         aAdd(aWords, cWord)
     EndIf
-    
+
     For i := 1 To Len(aWords)
         cWord := aWords[i]
         nWordLen := Len(cWord)
         nLineLen := Len(cLine)
-        
-        If nLineLen + nWordLen + (Empty(cLine) .And. 0 .Or. 1) <= nMaxLen
+
+        nSep := 0
+        If !Empty(cLine)
+            nSep := 1
+        EndIf
+
+        If nLineLen + nWordLen + nSep <= nMaxLen
             If !Empty(cLine)
                 cLine := cLine + " "
             EndIf
@@ -221,11 +240,11 @@ Static Function WordWrap(cText, nMaxLen)
             cLine := cWord
         EndIf
     Next i
-    
+
     If !Empty(cLine)
         aAdd(aLines, cLine)
     EndIf
-    
+
 Return aLines
 
 /*/{Protheus.doc} ShowBBSHeader
@@ -233,13 +252,13 @@ Return aLines
 /*/
 Static Function ShowBBSHeader(cEsc, nWidth)
     Local cArt := cEsc + "[1;33m" + ;
-        " ╔" + Replicate("═", nWidth - 2) + "╗" + Chr(10) + ;
+        " ╔" + Replicate("�?", nWidth - 2) + "╗" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + PadCenter("SHORTCODER", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + PadCenter("[AI Coding Agent v1.0] [BBS Edition]", nWidth - 2) + "║" + Chr(10) + ;
         " ║" + Replicate(" ", nWidth - 2) + "║" + Chr(10) + ;
-        " ╚" + Replicate("═", nWidth - 2) + "╝" + cEsc + "[0m"
+        " ╚" + Replicate("�?", nWidth - 2) + "�?" + cEsc + "[0m"
     
     ConOut(cArt)
 Return Nil
@@ -271,7 +290,7 @@ Static Function ShowStatus(cEsc, cModel, cSession, cAgent, cMemUser, nWidth)
     cLine4 := " │ MEM0:   [" + cEsc + "[1;33m" + cMemUser + cEsc + "[36m" + "]                            │"
     
     ConOut(cEsc + "[2;36m" + ;
-        " ┌" + Replicate("─", nWidth - 2) + "┐" + Chr(10) + ;
+        " ┌" + Replicate("─", nWidth - 2) + "�?" + Chr(10) + ;
         cLine1 + Chr(10) + ;
         cLine2 + Chr(10) + ;
         cLine3 + Chr(10) + ;
@@ -379,7 +398,7 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     Local nBoxW := nWidth - 2
 
     nStart := Seconds()
-    cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + StrTran(cPrompt, Chr(34), '\"') + '"}],"stream":false,"max_tokens":500}'
+    cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
 
     nStatus := FWHTTPPOST("http://127.0.0.1:11434/v1/chat/completions", cBody, "application/json")
 
@@ -525,7 +544,7 @@ Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     Local nBoxW := nWidth - 2
 
     nStart := Seconds()
-    cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + StrTran(cPrompt, Chr(34), '\"') + '"}],"stream":false,"max_tokens":500}'
+    cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
 
     nStatus := FWHTTPPOST("http://127.0.0.1:9081/v1/chat/completions", cBody, "application/json")
 
@@ -572,7 +591,7 @@ Static Function RunMem0Add(cEsc, cUserId, cContent, nWidth, aHistory)
     Local nBoxW := nWidth - 2
 
     nStatus := FWHTTPPOST("http://127.0.0.1:9081/memories/" + cUserId, ;
-        '{"content":"' + StrTran(cContent, Chr(34), '\"') + '"}', ;
+        '{"content":"' + JsonEscape(cContent) + '"}', ;
         "application/json")
 
     ConOut("")
