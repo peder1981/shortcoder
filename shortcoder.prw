@@ -8,7 +8,7 @@
       - Roteia automaticamente para o agente mais adequado
       - Suporta multi-agente (agente primario + sec undario)
 @type function
-@author shortcoder
+@author Peder Munksgaard
 @since 02/08/2026
 /*/
 User Function Main()

@@ -1,12 +1,12 @@
-# shortcoder — Interface BBS Retrô
+# shortcoder — Interface Retrô
 
-Versao do shortcoder com estetica BBS (Bulletin Board System) classica dos anos 90.
+Versao do shortcoder com estetica (Bulletin Board System) classica dos anos 90.
 
 ## Visual
 
 - **ASCII Art** no header com o nome "SHORTCODER"
 - **Cores vintage**: amarelo (#FFFF00), ciano, verde, magenta
-- **Caixas delimitadas** com `+──+|` estilo BBS
+- **Caixas delimitadas** com `+──+|` estilo
 - **Status bar** comModel/Session/Agent/Mem0
 - **Mensagens formatadas** em blocos com bordas
 
@@ -50,7 +50,7 @@ printf '/help\n/exit\n' | ./shortcoder
 printf '2+2\n/exit\n' | ./shortcoder
 
 # Testar memoria
-printf '/mem0 add "teste BBS"\n/mem0 list\n/exit\n' | ./shortcoder
+printf '/mem0 add "teste"\n/mem0 list\n/exit\n' | ./shortcoder
 
 # Testar historico
 printf 'ola\n/history\n/exit\n' | ./shortcoder
@@ -62,4 +62,4 @@ printf 'ola\n/history\n/exit\n' | ./shortcoder
 |--------|--------|-----------------|
 | shortcoder | Minimalista | LLM via ProcRun |
 | shortcoder-rag | Cards modernos | LLM + Mem0 HTTP |
-| **shortcoder** | **BBS retrô** | **LLM + Mem0 + visual** |
+| **shortcoder** | **retrô** | **LLM + Mem0 + visual** |

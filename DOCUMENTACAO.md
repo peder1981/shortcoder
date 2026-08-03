@@ -2,11 +2,11 @@
 
 ## Visao Geral
 
-`shortcoder` eh uma TUI (Terminal User Interface) no estilo BBS (Bulletin Board System) classico dos anos 90, construida em AdvPL/TLPP e compilada com AdvPP.
+`shortcoder` eh uma TUI (Terminal User Interface) no estilo classico dos anos 90, construida em AdvPL/TLPP e compilada com AdvPP.
 
 ### Caracteristicas
 
-- **Interface BBS retrô**: ASCII art, cores vintage (amarelo, ciano, verde, magenta), caixas delimitadas
+- **Interfaceretrô**: ASCII art, cores vintage (amarelo, ciano, verde, magenta), caixas delimitadas
 - **Orquestracao de agentes**: Roteamento automatico baseado no dominio da pergunta
 - **100% legivel**: Texto quebrado corretamente, padding dinamico, caixas proporcionais
 - **3 agentes integrados**:
@@ -79,7 +79,7 @@ advplc build shortcoder.prw -o shortcoder
 ║                                                                          ║
 ║                                SHORTCODER                                ║
 ║                                                                          ║
-║                   [AI Coding Agent v1.0] [BBS Edition]                   ║
+║                   [AI Coding Agent v1.0]                  ║
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -199,7 +199,7 @@ Return aLines
 ```
 
 #### `FormatTextForBox(cEsc, cText, nMaxLen, nBoxW)`
-Formata texto para caber dentro de caixa BBS.
+Formata texto para caber dentro de caixa.
 
 ```advpl
 Static Function FormatTextForBox(cEsc, cText, nMaxLen, nBoxW)
@@ -296,7 +296,7 @@ printf 'o que e o campo A1_COD?\n/exit\n' | ./shortcoder
 ├── shortcoder          # Binario ELF (44MB)
 ├── shortcoder.prw      # Fonte AdvPL (26KB)
 ├── TEST_RESULTS.md         # Resultados dos testes
-├── BBS_README.md           # Resumo rapido
+├──_README.md           # Resumo rapido
 ├── DOCUMENTACAO.md         # Este arquivo
 ├── shortcoder              # Versao original
 ├── shortcoder.prw
