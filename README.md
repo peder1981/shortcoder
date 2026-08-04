@@ -10,14 +10,20 @@ Linux (x86_64) e macOS (Apple Silicon):
 curl -fsSL https://raw.githubusercontent.com/peder1981/shortcoder/master/install.sh | bash
 ```
 
-Instala em `~/.local/bin/shortcoder`. Windows: baixe `shortcoder-windows-amd64.zip` na
-[página de releases](https://github.com/peder1981/shortcoder/releases/latest) e extraia.
+Instala em `~/.local/bin/shortcoder`.
+
+Windows: baixe e execute `shortcoder-windows-amd64-setup.exe` na
+[página de releases](https://github.com/peder1981/shortcoder/releases/latest) — instalador
+NSIS que copia o binário para `%LOCALAPPDATA%\Programs\shortcoder`, cria atalho no Menu
+Iniciar e adiciona ao PATH do usuário (abra um terminal novo depois de instalar). O
+instalador não é assinado digitalmente, então o SmartScreen do Windows vai avisar na
+primeira execução — clique em "Mais informações" → "Executar assim mesmo".
 
 | Plataforma | Arquitetura | Asset |
 |------------|-------------|-------|
 | Linux | amd64 | `shortcoder-linux-amd64.tar.gz` |
 | macOS | arm64 (Apple Silicon) | `shortcoder-macos-arm64.tar.gz` |
-| Windows | amd64 | `shortcoder-windows-amd64.zip` |
+| Windows | amd64 | `shortcoder-windows-amd64-setup.exe` (instalador) ou `shortcoder-windows-amd64.zip` (binário avulso) |
 
 Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do download.
 

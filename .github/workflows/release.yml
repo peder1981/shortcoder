@@ -24,7 +24,7 @@ jobs:
       - name: Install build dependencies (X11/GL headers + mingw-w64)
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 libgl1-mesa-dev xorg-dev
+          sudo apt-get install -y gcc-mingw-w64-x86-64 libgl1-mesa-dev xorg-dev nsis
 
       - name: Build advplc
         run: |
@@ -45,6 +45,10 @@ jobs:
           CGO_ENABLED: "1"
           ADVPP_SRC: ${{ github.workspace }}/AdvPP
         run: ./AdvPP/advplc build shortcoder.prw -o dist/shortcoder-windows-amd64.exe
+
+      - name: Build Windows installer
+        run: |
+          makensis -DEXE_PATH=dist/shortcoder-windows-amd64.exe -DOUT_PATH=dist/shortcoder-windows-amd64-setup.exe installer/windows.nsi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -99,7 +103,7 @@ jobs:
           tar -czf shortcoder-linux-amd64.tar.gz shortcoder-linux-amd64
           tar -czf shortcoder-macos-arm64.tar.gz shortcoder-macos-arm64
           zip shortcoder-windows-amd64.zip shortcoder-windows-amd64.exe
-          sha256sum *.tar.gz *.zip > checksums.txt
+          sha256sum *.tar.gz *.zip shortcoder-windows-amd64-setup.exe > checksums.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -107,5 +111,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/shortcoder-windows-amd64-setup.exe
             dist/checksums.txt
           generate_release_notes: true
