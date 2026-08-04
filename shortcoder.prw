@@ -30,7 +30,6 @@ User Function Main()
     LoadModels(cModelsJs, @aModels, @cDefModel)
     cModel := cDefModel
 
-    UiAltScreenEnter()
     ShowBBSHeader(cEsc, nWidth)
     ShowStatus(cEsc, cModel, cSession, cAgent, cMemUser, nWidth)
 
@@ -98,7 +97,6 @@ User Function Main()
         EndIf
     End
 
-    UiAltScreenExit()
     ConOut(cEsc + "[2m[EOF] Conectado por " + cSession + cEsc + "[0m")
 Return
 
