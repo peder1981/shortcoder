@@ -230,58 +230,159 @@ Static Function Utf8Len(cText)
     End
 Return nChars
 
-/*/{Protheus.doc} WordWrap
-    Quebra texto em linhas de tamanho maximo, respeitando palavras
+/*/{Protheus.doc} SplitLines
+    Quebra texto em array de linhas por Chr(10) (StrTokArray nao existe
+    nesta runtime). Preserva linhas vazias (paragrafos/listas dependem
+    delas para saber onde um bloco termina).
 @type function
 /*/
-Static Function WordWrap(cText, nMaxLen)
+Static Function SplitLines(cText)
     Local aLines := {}
-    Local aWords := {}
-    Local cWord := ""
-    Local cLine := ""
-    Local cChar
-    Local nWordLen, nLineLen, nSep
-    Local nLen, i
+    Local cLine  := ""
+    Local nLen, i, cChar
 
-    cText := StrTran(cText, Chr(10), " ")
-    cText := StrTran(cText, Chr(13), " ")
-    // Manual tokenization since StrTokArray doesn't exist
-    nLen := Len(cText)
+    cText := StrTran(cText, Chr(13), "")
+    nLen  := Len(cText)
 
     For i := 1 To nLen
         cChar := SubStr(cText, i, 1)
-        If cChar == " " .And. !Empty(cWord)
-            aAdd(aWords, cWord)
-            cWord := ""
+        If cChar == Chr(10)
+            aAdd(aLines, cLine)
+            cLine := ""
         Else
-            cWord := cWord + cChar
+            cLine := cLine + cChar
         EndIf
     Next i
+    aAdd(aLines, cLine)
+Return aLines
 
+/*/{Protheus.doc} MdInlineToAnsi
+    Converte marcadores inline de Markdown (**negrito**, `codigo`) em
+    codigos ANSI SGR (negrito 1/22, sublinhado 4/24 para inline-code —
+    eixos independentes, nunca reaproveita a cor base, entao nao ha
+    risco de "vazar" a cor da caixa). Assume marcadores balanceados
+    dentro da MESMA linha logica (paragrafo antes do wrap); e assim que
+    o JSON de resposta do LLM chega, normalmente sem \n no meio de um
+    span de negrito.
+@type function
+/*/
+Static Function MdInlineToAnsi(cEsc, cText)
+    Local cResult := ""
+    Local nLen := Len(cText)
+    Local i := 1
+    Local lBold := .F.
+    Local lCode := .F.
+    Local cChar, cNext
+
+    While i <= nLen
+        cChar := SubStr(cText, i, 1)
+        cNext := SubStr(cText, i + 1, 1)
+        If cChar == "*" .And. cNext == "*"
+            If lBold
+                cResult += cEsc + "[22m"
+            Else
+                cResult += cEsc + "[1m"
+            EndIf
+            lBold := !lBold
+            i += 2
+        ElseIf cChar == "`"
+            If lCode
+                cResult += cEsc + "[24m"
+            Else
+                cResult += cEsc + "[4m"
+            EndIf
+            lCode := !lCode
+            i++
+        Else
+            cResult += cChar
+            i++
+        EndIf
+    End
+Return cResult
+
+/*/{Protheus.doc} WordWrapAnsi
+    WordWrap ANSI-aware: trata sequencias ESC[...m como largura zero
+    (nunca conta pro limite, nunca quebra no meio de uma), mede palavras
+    por Utf8Len(StripANSI(...)) — mesma dupla ja usada em BoxLineAuto,
+    entao o alinhamento de borda continua garantido mesmo com negrito/
+    sublinhado inline. Ao quebrar de linha visual NO MEIO de um span de
+    negrito/inline-code, reabre o(s) estilo(s) ativo(s) no inicio da
+    proxima linha — a caixa (BoxLine) sempre emite um reset antes do
+    conteudo, entao o estado visual se perderia sem isso.
+@type function
+/*/
+Static Function WordWrapAnsi(cEsc, cAnsiText, nMaxLen)
+    Local aLines := {}
+    Local aWords := {}
+    Local aCarry := {}
+    Local cWord := ""
+    Local cLine := ""
+    Local cActiveBold := ""
+    Local cActiveULine := ""
+    Local cChar, cSeq
+    Local nLen, i, nRel, nCandLen
+
+    nLen := Len(cAnsiText)
+    i := 1
+    While i <= nLen
+        cChar := SubStr(cAnsiText, i, 1)
+        If cChar == cEsc .And. SubStr(cAnsiText, i + 1, 1) == "["
+            nRel := At("m", SubStr(cAnsiText, i))
+            If nRel > 0
+                cSeq  := SubStr(cAnsiText, i, nRel)
+                cWord += cSeq
+                If cSeq == cEsc + "[1m"
+                    cActiveBold := cSeq
+                ElseIf cSeq == cEsc + "[22m"
+                    cActiveBold := ""
+                ElseIf cSeq == cEsc + "[4m"
+                    cActiveULine := cSeq
+                ElseIf cSeq == cEsc + "[24m"
+                    cActiveULine := ""
+                EndIf
+                i += nRel
+            Else
+                cWord += cChar
+                i++
+            EndIf
+        ElseIf cChar == " "
+            If !Empty(cWord)
+                aAdd(aWords, cWord)
+                aAdd(aCarry, cActiveBold + cActiveULine)
+                cWord := ""
+            EndIf
+            i++
+        Else
+            cWord += cChar
+            i++
+        EndIf
+    End
     If !Empty(cWord)
         aAdd(aWords, cWord)
+        aAdd(aCarry, cActiveBold + cActiveULine)
     EndIf
 
     For i := 1 To Len(aWords)
         cWord := aWords[i]
-        nWordLen := Len(cWord)
-        nLineLen := Len(cLine)
 
-        nSep := 0
-        If !Empty(cLine)
-            nSep := 1
+        If Empty(cLine)
+            nCandLen := Utf8Len(StripANSI(cEsc, cWord))
+        Else
+            nCandLen := Utf8Len(StripANSI(cEsc, cLine)) + 1 + Utf8Len(StripANSI(cEsc, cWord))
         EndIf
 
-        If nLineLen + nWordLen + nSep <= nMaxLen
+        If nCandLen <= nMaxLen .Or. Empty(cLine)
             If !Empty(cLine)
                 cLine := cLine + " "
             EndIf
             cLine := cLine + cWord
         Else
-            If !Empty(cLine)
-                aAdd(aLines, cLine)
+            aAdd(aLines, cLine)
+            If i > 1 .And. !Empty(aCarry[i - 1])
+                cLine := aCarry[i - 1] + cWord
+            Else
+                cLine := cWord
             EndIf
-            cLine := cWord
         EndIf
     Next i
 
@@ -677,9 +778,9 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
                 Local cContent := AllTrim(oChoice["message"]["content"])
                 Local cReasoning := AllTrim(oChoice["message"]["reasoning"])
                 If !Empty(cContent)
-                    cResponse := FormatTextForBox(cEsc, cContent, nInner, "1;36")
+                    cResponse := FormatMarkdownForBox(cEsc, cContent, nInner, "1;36")
                 ElseIf !Empty(cReasoning)
-                    cResponse := FormatTextForBox(cEsc, cReasoning, nInner, "1;36")
+                    cResponse := FormatMarkdownForBox(cEsc, cReasoning, nInner, "1;36")
                 Else
                     cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO CONTENT]" + cEsc + "[0m", nInner, "1;36")
                 EndIf
@@ -712,20 +813,101 @@ Static Function BoxAgentTitle(cEsc, cLabel, cSub, nInner, cColor)
     Local cContent := " " + cEsc + "[1;33m" + cLabel + cEsc + "[0m" + " " + cEsc + "[2m" + cSub + cEsc + "[0m"
 Return BoxLine(cEsc, cContent, Len(cPlain), nInner, cColor)
 
-/*/{Protheus.doc} FormatTextForBox
-    Formata texto em linhas com borda │...│ dentro de nInner, quebrando
-    palavras (WordWrap) — mesma tecnica das demais caixas do app.
+/*/{Protheus.doc} FormatMarkdownForBox
+    Formata Markdown (respostas de LLM) em linhas com borda │...│,
+    tratando cada elemento pelo seu tipo em vez de derramar tudo como
+    texto corrido:
+      - blocos ```codigo``` — sem wordwrap, sem negrito/inline-code,
+        cor propria, separador dim onde estavam as cercas
+      - #/##/### cabecalho — negrito, sem marcador
+      - -/* item / N. item — marcador preservado + indentacao pendurada
+        (linhas de continuacao alinham sob o texto, nao sob o marcador)
+      - linha em branco — paragrafo (BoxLine vazia)
+      - paragrafo comum — marcadores de negrito e codigo inline viram
+        ANSI, depois WordWrapAnsi (ANSI-aware, preserva alinhamento)
 @type function
 /*/
-Static Function FormatTextForBox(cEsc, cText, nInner, cColor)
-    Local aLines, cLine, cResult := "", i
+Static Function FormatMarkdownForBox(cEsc, cText, nInner, cColor)
+    Local aSrc := SplitLines(cText)
+    Local cResult := ""
     Local nMaxLen := Max(1, nInner - 2)
+    Local lInCode := .F.
+    Local cLine, cTrim, cRest, cMarker, cAnsi
+    Local aWrapped
+    Local i, j, nDigits, nHang
 
-    aLines := WordWrap(cText, nMaxLen)
+    For i := 1 To Len(aSrc)
+        cLine := aSrc[i]
+        cTrim := AllTrim(cLine)
 
-    For i := 1 To Len(aLines)
-        cLine := " " + aLines[i]
-        cResult := cResult + BoxLine(cEsc, cEsc + "[2;37m" + cLine + cEsc + "[0m", Utf8Len(cLine), nInner, cColor) + Chr(10)
+        If Left(cTrim, 3) == "```"
+            lInCode := !lInCode
+            cResult += BoxLineAuto(cEsc, cEsc + "[2m" + Replicate("─", Min(nMaxLen, 16)) + cEsc + "[0m", nInner, cColor) + Chr(10)
+            Loop
+        EndIf
+
+        If lInCode
+            If Utf8Len(cLine) > nMaxLen
+                cLine := Left(cLine, nMaxLen)  // ponytail: corte bruto se a linha de codigo nao couber; sem hifenizacao
+            EndIf
+            cResult += BoxLineAuto(cEsc, " " + cEsc + "[0;33m" + cLine + cEsc + "[0m", nInner, cColor) + Chr(10)
+            Loop
+        EndIf
+
+        If Empty(cTrim)
+            cResult += BoxLine(cEsc, "", 0, nInner, cColor) + Chr(10)
+            Loop
+        EndIf
+
+        If Left(cTrim, 1) == "#"
+            j := 1
+            While SubStr(cTrim, j, 1) == "#"
+                j++
+            End
+            cRest := AllTrim(SubStr(cTrim, j))
+            aWrapped := WordWrapAnsi(cEsc, cEsc + "[1m" + cRest + cEsc + "[22m", nMaxLen)
+            For j := 1 To Len(aWrapped)
+                cResult += BoxLineAuto(cEsc, " " + aWrapped[j], nInner, cColor) + Chr(10)
+            Next j
+            Loop
+        EndIf
+
+        cMarker := ""
+        If Left(cTrim, 2) == "- " .Or. Left(cTrim, 2) == "* "
+            cMarker := "• "
+            cRest   := SubStr(cTrim, 3)
+        Else
+            nDigits := 0
+            j := 1
+            While SubStr(cTrim, j, 1) $ "0123456789"
+                nDigits++
+                j++
+            End
+            If nDigits > 0 .And. SubStr(cTrim, j, 2) == ". "
+                cMarker := Left(cTrim, j + 1) + " "
+                cRest   := SubStr(cTrim, j + 2)
+            EndIf
+        EndIf
+
+        If !Empty(cMarker)
+            nHang := Utf8Len(cMarker)
+            cAnsi := MdInlineToAnsi(cEsc, cRest)
+            aWrapped := WordWrapAnsi(cEsc, cAnsi, Max(1, nMaxLen - nHang))
+            For j := 1 To Len(aWrapped)
+                If j == 1
+                    cResult += BoxLineAuto(cEsc, " " + cEsc + "[1m" + cMarker + cEsc + "[22m" + aWrapped[j], nInner, cColor) + Chr(10)
+                Else
+                    cResult += BoxLineAuto(cEsc, " " + Replicate(" ", nHang) + aWrapped[j], nInner, cColor) + Chr(10)
+                EndIf
+            Next j
+            Loop
+        EndIf
+
+        cAnsi := MdInlineToAnsi(cEsc, cTrim)
+        aWrapped := WordWrapAnsi(cEsc, cAnsi, nMaxLen)
+        For j := 1 To Len(aWrapped)
+            cResult += BoxLineAuto(cEsc, " " + aWrapped[j], nInner, cColor) + Chr(10)
+        Next j
     Next i
 
 Return cResult
@@ -832,7 +1014,7 @@ Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory, nTimeou
         If oJ:FromJson(cBody)
             oChoice := oJ["choices"][1]
             If ValType(oChoice) == "O"
-                cResponse := FormatTextForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;35")
+                cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;35")
             Else
                 cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m", nInner, "1;35")
             EndIf
