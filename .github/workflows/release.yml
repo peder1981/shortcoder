@@ -48,7 +48,7 @@ jobs:
 
       - name: Build Windows installer
         run: |
-          makensis -DEXE_PATH=dist/shortcoder-windows-amd64.exe -DOUT_PATH=dist/shortcoder-windows-amd64-setup.exe installer/windows.nsi
+          makensis -DEXE_PATH="${{ github.workspace }}/dist/shortcoder-windows-amd64.exe" -DOUT_PATH="${{ github.workspace }}/dist/shortcoder-windows-amd64-setup.exe" installer/windows.nsi
 
       - uses: actions/upload-artifact@v4
         with:
