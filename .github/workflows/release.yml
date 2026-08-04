@@ -21,8 +21,10 @@ jobs:
         with:
           go-version-file: AdvPP/go.mod
 
-      - name: Install mingw-w64 (Windows cross-compiler)
-        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Install build dependencies (X11/GL headers + mingw-w64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 libgl1-mesa-dev xorg-dev
 
       - name: Build advplc
         run: |
