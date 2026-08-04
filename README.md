@@ -2,6 +2,25 @@
 
 Versao do shortcoder com estetica (Bulletin Board System) classica dos anos 90.
 
+## Instalacao rapida
+
+Linux (x86_64) e macOS (Apple Silicon):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/peder1981/shortcoder/master/install.sh | bash
+```
+
+Instala em `~/.local/bin/shortcoder`. Windows: baixe `shortcoder-windows-amd64.zip` na
+[página de releases](https://github.com/peder1981/shortcoder/releases/latest) e extraia.
+
+| Plataforma | Arquitetura | Asset |
+|------------|-------------|-------|
+| Linux | amd64 | `shortcoder-linux-amd64.tar.gz` |
+| macOS | arm64 (Apple Silicon) | `shortcoder-macos-arm64.tar.gz` |
+| Windows | amd64 | `shortcoder-windows-amd64.zip` |
+
+Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do download.
+
 ## Visual
 
 - **ASCII Art** no header com o nome "SHORTCODER"
@@ -32,13 +51,28 @@ Versao do shortcoder com estetica (Bulletin Board System) classica dos anos 90.
 | mem0 | `:9081/memories/` | <1s | Memoria persistente |
 | ernesto | `:9081/v1/chat` | >30s (timeout) | RAG + contexto |
 
-## Como Compilar
+## Como Compilar (a partir do fonte)
+
+Requer um checkout do [AdvPP](https://github.com/peder1981/AdvPP) (`ADVPP_SRC` ou rodar de
+dentro do próprio repositório do compilador) e toolchain Go + C (CGO obrigatório).
 
 ```bash
 cd ~/Projetos/shortcoder
 advplc build shortcoder.prw -o shortcoder
 ./shortcoder
 ```
+
+Cross-compile para Windows a partir do Linux (via `mingw-w64`):
+
+```bash
+sudo apt install gcc-mingw-w64-x86-64
+GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 \
+  ADVPP_SRC=/caminho/para/AdvPP advplc build shortcoder.prw -o shortcoder.exe
+```
+
+macOS precisa compilar nativamente numa Mac (CGO + frameworks Cocoa/OpenGL não cruzam a
+partir do Linux) — é o que o workflow `.github/workflows/release.yml` faz num runner
+`macos-latest` a cada tag `vX.Y.Z` publicada.
 
 ## Testes
 

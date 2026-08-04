@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  linux-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: peder1981/AdvPP
+          path: AdvPP
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: AdvPP/go.mod
+
+      - name: Install mingw-w64 (Windows cross-compiler)
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Build advplc
+        run: |
+          cd AdvPP
+          go build -o advplc ./cmd/advplc
+
+      - name: Build shortcoder (linux/amd64)
+        run: |
+          mkdir -p dist
+          ./AdvPP/advplc build shortcoder.prw -o dist/shortcoder-linux-amd64
+          chmod +x dist/shortcoder-linux-amd64
+
+      - name: Build shortcoder (windows/amd64)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CC: x86_64-w64-mingw32-gcc
+          CGO_ENABLED: "1"
+          ADVPP_SRC: ${{ github.workspace }}/AdvPP
+        run: ./AdvPP/advplc build shortcoder.prw -o dist/shortcoder-windows-amd64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-windows
+          path: dist/*
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: peder1981/AdvPP
+          path: AdvPP
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: AdvPP/go.mod
+
+      - name: Build advplc
+        run: |
+          cd AdvPP
+          go build -o advplc ./cmd/advplc
+
+      - name: Build shortcoder (macos/arm64)
+        run: |
+          mkdir -p dist
+          ./AdvPP/advplc build shortcoder.prw -o dist/shortcoder-macos-arm64
+          chmod +x dist/shortcoder-macos-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*
+
+  release:
+    needs: [linux-windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Package
+        run: |
+          cd dist
+          chmod +x shortcoder-linux-amd64 shortcoder-macos-arm64
+          tar -czf shortcoder-linux-amd64.tar.gz shortcoder-linux-amd64
+          tar -czf shortcoder-macos-arm64.tar.gz shortcoder-macos-arm64
+          zip shortcoder-windows-amd64.zip shortcoder-windows-amd64.exe
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true
