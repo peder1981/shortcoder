@@ -25,6 +25,7 @@ User Function Main()
     Local cMemUser  := "default"
     Local aHistory  := {}
     Local cSelectedAgent
+    Local nErnestoTimeout := Val(GetEnv("SHORTCODER_ERNESTO_TIMEOUT", "90"))
 
     LoadModels(cModelsJs, @aModels, @cDefModel)
     cModel := cDefModel
@@ -75,6 +76,12 @@ User Function Main()
         ElseIf Lower(cInput) == "/history"
             ShowHistory(cEsc, aHistory, nWidth)
             Loop
+        ElseIf Lower(Left(cInput, 9)) == "/timeout "
+            If Val(SubStr(cInput, 10)) > 0
+                nErnestoTimeout := Val(SubStr(cInput, 10))
+            EndIf
+            ConOut(cEsc + "[2m  ernesto timeout: " + AllTrim(Str(nErnestoTimeout)) + "s" + cEsc + "[0m")
+            Loop
         Else
             ShowUserMessage(cEsc, cInput, nWidth)
             
@@ -84,7 +91,7 @@ User Function Main()
             If cSelectedAgent == "mem0"
                 RunMem0Agent(cEsc, cMemUser, nWidth, @aHistory)
             ElseIf cSelectedAgent == "ernesto"
-                RunErnestoAgent(cEsc, cInput, cModel, nWidth, @aHistory)
+                RunErnestoAgent(cEsc, cInput, cModel, nWidth, @aHistory, nErnestoTimeout)
             Else
                 RunOllamaAgent(cEsc, cInput, cModel, nWidth, @aHistory)
             EndIf
@@ -539,6 +546,7 @@ Static Function ShowBBSHelp(cEsc, nWidth)
     ConOut(BoxSection(cEsc, "AGENTES:", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/agent", "Switch agent (ollama/mem0/ernesto)", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/model", "List & select model", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/timeout <n>", "Set ernesto HTTP timeout (seconds)", nInner, "1;33"))
     ConOut(BoxBlank(cEsc, nInner, "1;33"))
     ConOut(BoxSection(cEsc, "MEMORIA PERSISTENTE:", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/mem0 list", "View saved memories", nInner, "1;33"))
@@ -793,22 +801,28 @@ Return Nil
 /*/{Protheus.doc} RunErnestoAgent
 @type function
 /*/
-Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
+Static Function RunErnestoAgent(cEsc, cPrompt, cModel, nWidth, aHistory, nTimeout)
     Local cResponse
     Local nStart
     Local nStatus
     Local cBody, oJ, oChoice
     Local nInner := nWidth - 2
 
+    If nTimeout == Nil .Or. nTimeout <= 0
+        nTimeout := 90
+    EndIf
+
     nStart := Seconds()
     cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
 
+    FWHTTPTIMEOUT(nTimeout)
     nStatus := FWHTTPPOST("http://127.0.0.1:9081/v1/chat/completions", cBody, "application/json")
+    FWHTTPTIMEOUT(30)
 
     If nStatus != 200
         Local cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
-            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] RAG pipeline slow (>30s) — use ollama agent for fast responses" + cEsc + "[0m", nInner, "1;35")
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] RAG pipeline slower than " + AllTrim(Str(nTimeout)) + "s — try /timeout <n> or /agent 1 for fast LLM" + cEsc + "[0m", nInner, "1;35")
         Else
             cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;35")
         EndIf
