@@ -722,7 +722,7 @@ Static Function PickModel(cEsc, aModels, cCurrent, nWidth)
     ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
     ConOut(BoxDivD(cEsc, nInner, "1;33"))
 
-    For i := 1 To Min(Len(aModels), 20)
+    For i := 1 To Len(aModels)
         cName    := Left(aModels[i][1], Max(0, nInner - 8))
         cPlain   := "  [" + StrZero(i, 2) + "] " + cName
         cContent := "  " + cEsc + "[2m[" + StrZero(i, 2) + "]" + cEsc + "[0m " + cEsc + "[1;36m" + cName + cEsc + "[0m"
