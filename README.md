@@ -49,6 +49,21 @@ Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do do
 /exit      — Sair
 ```
 
+## Atalhos de teclado
+
+Em terminal interativo (não em pipe/redirect), o prompt suporta os atalhos comuns de shell/readline:
+
+| Atalho | Ação |
+|--------|------|
+| `↑` / `↓` | Navega o histórico dos últimos 20 comandos digitados |
+| `←` / `→` | Move o cursor na linha |
+| `Ctrl+A` / `Ctrl+E` | Vai para início / fim da linha |
+| `Ctrl+U` / `Ctrl+K` | Apaga até o início / fim da linha |
+| `Backspace` / `Delete` | Apaga o caractere antes / depois do cursor |
+| `Ctrl+L` | Limpa a tela, mantém a linha em edição |
+| `Ctrl+C` | Cancela a linha atual (não sai do programa) |
+| `Ctrl+D` | Sai (só em linha vazia, como no bash) |
+
 ## Agentes
 
 | Agente | Backend | Velocidade | Uso |
