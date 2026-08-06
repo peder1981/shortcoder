@@ -91,6 +91,8 @@ User Function Main()
                 RunMem0Agent(cEsc, cMemUser, nWidth, @aHistory)
             ElseIf cSelectedAgent == "ernesto"
                 RunErnestoAgent(cEsc, cInput, cModel, nWidth, @aHistory, nErnestoTimeout)
+            ElseIf cSelectedAgent == "agnes"
+                RunAgnesAgent(cEsc, cInput, nWidth, @aHistory)
             Else
                 RunOllamaAgent(cEsc, cInput, cModel, nWidth, @aHistory)
             EndIf
@@ -598,6 +600,8 @@ Static Function AgentColor(cAgent)
         Return "1;32"
     Case Lower(cAgent) == "ernesto"
         Return "1;35"
+    Case Lower(cAgent) == "agnes"
+        Return "1;33"
     EndCase
 Return "1;37"
 
@@ -643,7 +647,7 @@ Static Function ShowBBSHelp(cEsc, nWidth)
     ConOut(BoxShadeD(cEsc, nInner, "1;33", "0;33", "░"))
     ConOut(BoxDivD(cEsc, nInner, "1;33"))
     ConOut(BoxSection(cEsc, "AGENTES:", nInner, "1;33"))
-    ConOut(BoxCmdLine(cEsc, "/agent", "Switch agent (ollama/mem0/ernesto)", nInner, "1;33"))
+    ConOut(BoxCmdLine(cEsc, "/agent", "Switch agent (ollama/mem0/ernesto/agnes)", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/model", "List & select model", nInner, "1;33"))
     ConOut(BoxCmdLine(cEsc, "/timeout <n>", "Set ernesto HTTP timeout (seconds)", nInner, "1;33"))
     ConOut(BoxBlank(cEsc, nInner, "1;33"))
@@ -677,10 +681,11 @@ Static Function PickAgent(cEsc, cCurrent, nWidth)
     ConOut(BoxOptionLine(cEsc, "1", "1;36", "ollama",  "Fast LLM (lfm25, ~1s response)",  nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "2", "1;32", "mem0",    "Persistent memory queries",       nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "3", "1;35", "ernesto", "RAG + Memory (slow, >30s)",       nInner, "1;33"))
+    ConOut(BoxOptionLine(cEsc, "4", "1;33", "agnes",   "Agnes 2.5 Flash (remote, cloud)", nInner, "1;33"))
     ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
 
-    cChoice := AllTrim(ConIn("Select agent [1-3] (Enter=" + cCurrent + "): "))
+    cChoice := AllTrim(ConIn("Select agent [1-4] (Enter=" + cCurrent + "): "))
     ConOut("")
 
     If cChoice == "1"
@@ -689,6 +694,8 @@ Static Function PickAgent(cEsc, cCurrent, nWidth)
         Return "mem0"
     ElseIf cChoice == "3"
         Return "ernesto"
+    ElseIf cChoice == "4"
+        Return "agnes"
     EndIf
 Return cCurrent
 
@@ -800,6 +807,75 @@ Static Function RunOllamaAgent(cEsc, cPrompt, cModel, nWidth, aHistory)
     ConOut("")
 
     aAdd(aHistory, {"ollama", cPrompt, Seconds() - nStart})
+Return Nil
+
+/*/{Protheus.doc} RunAgnesAgent
+    Agente remoto Agnes 2.5 Flash (https://wiki.agnes-ai.com/en/docs/agnes-25-flash),
+    API compativel com OpenAI chat completions. Chave via env var AGNES_API_KEY,
+    enviada como header "Authorization: Bearer <key>" (FWHTTPHEADER, limpo logo
+    apos a chamada pra nao vazar pras requisicoes locais de ollama/mem0/ernesto).
+@type function
+/*/
+Static Function RunAgnesAgent(cEsc, cPrompt, nWidth, aHistory)
+    Local cResponse
+    Local nStart
+    Local nStatus
+    Local cBody, oJ, oChoice
+    Local nInner := nWidth - 2
+    Local cApiKey := GetEnv("AGNES_API_KEY", "")
+
+    If Empty(cApiKey)
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] AGNES_API_KEY nao configurada" + cEsc + "[0m", nInner, "1;33")
+    Else
+        nStart := Seconds()
+        cBody := '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
+
+        FWHTTPHEADER("Authorization", "Bearer " + cApiKey)
+        nStatus := FWHTTPPOST("https://apihub.agnes-ai.com/v1/chat/completions", cBody, "application/json")
+        FWHTTPCLEARHEADERS()
+
+        If nStatus != 200
+            Local cErr := FWHTTPERROR()
+            If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
+                cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Agnes API too slow" + cEsc + "[0m", nInner, "1;33")
+            Else
+                cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] HTTP " + AllTrim(Str(nStatus)) + " — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;33")
+            EndIf
+        Else
+            cBody := FWHTTPBODY()
+            oJ := JsonObject():New()
+            If oJ:FromJson(cBody)
+                oChoice := oJ["choices"][1]
+                If ValType(oChoice) == "O"
+                    Local cContent := AllTrim(oChoice["message"]["content"])
+                    If !Empty(cContent)
+                        cResponse := FormatMarkdownForBox(cEsc, cContent, nInner, "1;33")
+                    Else
+                        cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO CONTENT]" + cEsc + "[0m", nInner, "1;33")
+                    EndIf
+                Else
+                    cResponse := BoxLineAuto(cEsc, cEsc + "[2m[NO RESPONSE]" + cEsc + "[0m", nInner, "1;33")
+                EndIf
+            Else
+                cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[PARSE ERR]" + cEsc + "[0m", nInner, "1;33")
+            EndIf
+        EndIf
+    EndIf
+
+    If nStart == Nil
+        nStart := Seconds()
+    EndIf
+
+    ConOut("")
+    ConOut(BoxTop(cEsc, nInner, "1;33"))
+    ConOut(BoxAgentTitle(cEsc, "AGENT:AGNES", "agnes-2.5-flash", nInner, "1;33"))
+    ConOut(BoxDiv(cEsc, nInner, "1;33"))
+    ConOut(cResponse)
+    ConOut(BoxBottom(cEsc, nInner, "1;33"))
+    ConOut(cEsc + "[2m  " + AllTrim(Str(Seconds() - nStart, 10, 1)) + "s response time" + cEsc + "[0m")
+    ConOut("")
+
+    aAdd(aHistory, {"agnes", cPrompt, Seconds() - nStart})
 Return Nil
 
 /*/{Protheus.doc} BoxAgentTitle

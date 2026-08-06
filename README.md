@@ -38,7 +38,7 @@ Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do do
 ## Comandos
 
 ```
-/agent     — Troca entre ollama (rapido), mem0 (memoria), ernesto (RAG)
+/agent     — Troca entre ollama (rapido), mem0 (memoria), ernesto (RAG), agnes (remoto)
 /model     — Lista e seleciona modelo
 /mem0 list — Visualiza memorias salvas
 /mem0 add  — Salva memoria persistente
@@ -56,6 +56,7 @@ Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do do
 | ollama | `:11434/v1/chat` | ~1-3s | Conversas rapidas |
 | mem0 | `:9081/memories/` | <1s | Memoria persistente |
 | ernesto | `:9081/v1/chat` | >30s (timeout) | RAG + contexto |
+| agnes | `apihub.agnes-ai.com/v1/chat/completions` | remoto (cloud) | Agnes 2.5 Flash — requer `AGNES_API_KEY` (ver [docs](https://wiki.agnes-ai.com/en/docs/agnes-25-flash)) |
 
 ## Como Compilar (a partir do fonte)
 
