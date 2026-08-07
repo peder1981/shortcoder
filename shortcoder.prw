@@ -899,7 +899,10 @@ Return Nil
     variaveis do VM principal), faz a chamada HTTP ao Ollama local e
     retorna a string da resposta. Sem UI (ConOut/Box) aqui — quem exibe
     e RunOrchestratorAgent, depois de FWJOBPOLL trazer o resultado.
-    Retorna "" em qualquer erro (status != 200, parse falho, sem conteudo).
+    Retorna um marcador "[ERR] ..." com detalhe do HTTP status/erro em
+    qualquer falha (status != 200, parse falho, sem conteudo), para que
+    RunOrchestratorAgent consiga exibir uma mensagem especifica em vez de
+    um generico "nao respondeu".
 @type function
 /*/
 Static Function OrchestratorOllamaJob(cModel, cPrompt)
@@ -922,6 +925,10 @@ Static Function OrchestratorOllamaJob(cModel, cPrompt)
                 EndIf
             EndIf
         EndIf
+    EndIf
+
+    If Empty(cContent)
+        Return "[ERR] HTTP " + AllTrim(Str(nStatus)) + " - " + Left(FWHTTPERROR(), 40)
     EndIf
 Return cContent
 
@@ -949,14 +956,14 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     Local nSpin := 1
 
     If Empty(cApiKey)
-        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] AGNES_API_KEY nao configurada" + cEsc + "[0m", nInner, "1;33")
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] AGNES_API_KEY nao configurada" + cEsc + "[0m", nInner, "1;31")
         ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
         aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
         Return Nil
     EndIf
 
     If Len(aModels) == 0
-        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] nenhum modelo local disponivel" + cEsc + "[0m", nInner, "1;33")
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] nenhum modelo local disponivel" + cEsc + "[0m", nInner, "1;31")
         ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
         aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
         Return Nil
@@ -972,9 +979,9 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     If Empty(cModeloEscolhido)
         cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
-            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Agnes API too slow (decide)" + cEsc + "[0m", nInner, "1;33")
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Agnes API too slow (decide)" + cEsc + "[0m", nInner, "1;31")
         Else
-            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] Agnes (decide) falhou — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;33")
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] Agnes (decide) falhou — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;31")
         EndIf
         ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
         aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
@@ -985,21 +992,26 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     cJobId := FWJOBSTART("OrchestratorOllamaJob", cModeloEscolhido, cPrompt)
 
     // ---- 3) ESPERA com spinner ----
-    uLocalResult := FWJOBPOLL(cJobId)
-    Do While ValType(uLocalResult) == "U"
+    // FWJOBDONE nao consome a entrada do job (ao contrario de FWJOBPOLL, que
+    // e destrutivo) — usamos ele so pra decidir quando parar de esperar, e
+    // chamamos FWJOBPOLL uma unica vez no final pra pegar o valor. Isso evita
+    // a colisao Nil/pendente: um job que legitimamente retornasse Nil faria
+    // o polling antigo (baseado em ValType(uLocalResult) == "U") travar pra
+    // sempre.
+    Do While !FWJOBDONE(cJobId)
         ConOutRaw(cEsc + "[2m  aguardando " + cModeloEscolhido + "... " + aSpin[nSpin] + cEsc + "[0m" + cEsc + "[K" + Chr(13))
         nSpin++
         If nSpin > Len(aSpin)
             nSpin := 1
         EndIf
         Sleep(150)
-        uLocalResult := FWJOBPOLL(cJobId)
     EndDo
     ConOutRaw(cEsc + "[K" + Chr(13))
+    uLocalResult := FWJOBPOLL(cJobId)
     cLocalAnswer := uLocalResult
 
-    If Empty(cLocalAnswer)
-        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] " + cModeloEscolhido + " nao respondeu" + cEsc + "[0m", nInner, "1;33")
+    If Left(cLocalAnswer, 5) == "[ERR]"
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] " + cModeloEscolhido + " " + cLocalAnswer + cEsc + "[0m", nInner, "1;31")
         ShowOrchestratorBox(cEsc, cModeloEscolhido, cResponse, nInner, Seconds() - nStart)
         aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
         Return Nil
@@ -1016,7 +1028,7 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     FWHTTPCLEARHEADERS()
 
     If nStatus != 200
-        cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+        cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
         ConOut(cEsc + "[2m  [AGNES REFINE FALHOU - exibindo resposta local]" + cEsc + "[0m")
     Else
         cBody := FWHTTPBODY()
@@ -1024,13 +1036,13 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
         If oJ:FromJson(cBody)
             oChoice := oJ["choices"][1]
             If ValType(oChoice) == "O" .And. !Empty(AllTrim(oChoice["message"]["content"]))
-                cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;33")
+                cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;31")
             Else
-                cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+                cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
                 ConOut(cEsc + "[2m  [AGNES SEM CONTEUDO - exibindo resposta local]" + cEsc + "[0m")
             EndIf
         Else
-            cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+            cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
             ConOut(cEsc + "[2m  [AGNES PARSE ERR - exibindo resposta local]" + cEsc + "[0m")
         EndIf
     EndIf
