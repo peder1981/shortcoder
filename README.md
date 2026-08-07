@@ -38,7 +38,7 @@ Cada release traz um `checksums.txt` (SHA-256) para conferir a integridade do do
 ## Comandos
 
 ```
-/agent     — Troca entre ollama (rapido), mem0 (memoria), ernesto (RAG), agnes (remoto)
+/agent     — Troca entre ollama (rapido), mem0 (memoria), ernesto (RAG), agnes (remoto), orchestrator (agnes roteia ollama local)
 /model     — Lista e seleciona modelo
 /mem0 list — Visualiza memorias salvas
 /mem0 add  — Salva memoria persistente
@@ -72,6 +72,7 @@ Em terminal interativo (não em pipe/redirect), o prompt suporta os atalhos comu
 | mem0 | `:9081/memories/` | <1s | Memoria persistente |
 | ernesto | `:9081/v1/chat` | >30s (timeout) | RAG + contexto |
 | agnes | `apihub.agnes-ai.com/v1/chat/completions` | remoto (cloud) | Agnes 2.5 Flash — requer `AGNES_API_KEY` (ver [docs](https://wiki.agnes-ai.com/en/docs/agnes-25-flash)) |
+| orchestrator | Agnes decide + `:11434` local + Agnes revisa | ~2 chamadas remotas + 1 local (async) | Agnes 2.5 Flash roteia a pergunta para o melhor modelo Ollama local (via job assíncrono do AdvPP) e revisa a resposta antes de exibir. Requer `AGNES_API_KEY` e Ollama local rodando. |
 
 ## Como Compilar (a partir do fonte)
 
