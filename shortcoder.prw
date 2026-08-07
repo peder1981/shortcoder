@@ -94,7 +94,7 @@ User Function Main()
             ElseIf cSelectedAgent == "agnes"
                 RunAgnesAgent(cEsc, cInput, nWidth, @aHistory)
             ElseIf cSelectedAgent == "orchestrator"
-                RunOrchestratorAgent(cEsc, cInput, aModels, nWidth, @aHistory)
+                RunOrchestratorAgent(cEsc, cInput, aModels, cModel, nWidth, @aHistory)
             Else
                 RunOllamaAgent(cEsc, cInput, cModel, nWidth, @aHistory)
             EndIf
@@ -934,10 +934,13 @@ Return cContent
     (DECIDE), despacha essa chamada numa goroutine assincrona via
     FWJOBSTART (DESPACHA), anima um spinner enquanto FWJOBPOLL nao traz
     resultado (ESPERA), e manda a resposta local de volta pra Agnes
-    revisar antes de exibir (REFINA).
+    revisar antes de exibir (REFINA). Se a Agnes estiver lenta/fora do
+    ar no passo DECIDE, cai pro modelo atualmente selecionado (cModel)
+    sem abortar — nesse caso pula o REFINA e mostra a resposta local
+    crua (a propria Agnes ja falhou, nao adianta chama-la de novo).
 @type function
 /*/
-Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
+Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, cModel, nWidth, aHistory)
     Local nInner := nWidth - 2
     Local cApiKey := GetEnv("AGNES_API_KEY", "")
     Local nStart := Seconds()
@@ -951,6 +954,7 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     Local cErr
     Local aSpin := {"|", "/", "-", "\"}
     Local nSpin := 1
+    Local lFallbackLocal := .F.
 
     If Empty(cApiKey)
         cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] AGNES_API_KEY nao configurada" + cEsc + "[0m", nInner, "1;31")
@@ -968,21 +972,20 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
 
     // ---- 1) DECIDE: Agnes escolhe o modelo local ----
     // DecideOrchestratorModel retorna "" especificamente quando a chamada
-    // HTTP a Agnes falhou (status != 200) — nesse caso abortamos, sem
-    // despachar job. Se a chamada teve sucesso mas Agnes respondeu um id
-    // que nao bate com nenhum aModels[i][1], a funcao ja faz fallback
-    // silencioso internamente e devolve um id valido (nunca "").
+    // HTTP a Agnes falhou (status != 200). Se a chamada teve sucesso mas
+    // Agnes respondeu um id que nao bate com nenhum aModels[i][1], a
+    // funcao ja faz fallback silencioso internamente e devolve um id
+    // valido (nunca "").
     cModeloEscolhido := DecideOrchestratorModel(cApiKey, aModels, cPrompt)
     If Empty(cModeloEscolhido)
         cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
-            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Agnes API too slow (decide)" + cEsc + "[0m", nInner, "1;31")
+            ConOut(cEsc + "[2m  [AGNES LENTA] timeout no DECIDE — usando " + cModel + " (fallback local, sem Agnes)" + cEsc + "[0m")
         Else
-            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] Agnes (decide) falhou — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;31")
+            ConOut(cEsc + "[2m  [AGNES INDISPONIVEL] " + Left(cErr, 40) + " — usando " + cModel + " (fallback local, sem Agnes)" + cEsc + "[0m")
         EndIf
-        ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
-        aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
-        Return Nil
+        cModeloEscolhido := cModel
+        lFallbackLocal := .T.
     EndIf
 
     // ---- 2) DESPACHA: chamada assincrona ao Ollama local ----
@@ -1015,32 +1018,38 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
     EndIf
 
     // ---- 4) REFINA: Agnes revisa a resposta local ----
-    FWHTTPHEADER("Authorization", "Bearer " + cApiKey)
-    cBody := '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"' + ;
-        JsonEscape("Pergunta original: " + cPrompt + Chr(10) + ;
-        "Resposta do modelo local (" + cModeloEscolhido + "): " + cLocalAnswer + Chr(10) + ;
-        "Revise essa resposta mantendo o mesmo idioma e conteudo, melhorando clareza e correcao. Responda apenas com a versao final.") + ;
-        '"}],"stream":false,"max_tokens":500}'
-    nStatus := FWHTTPPOST("https://apihub.agnes-ai.com/v1/chat/completions", cBody, "application/json")
-    FWHTTPCLEARHEADERS()
-
-    If nStatus != 200
+    // Pulado se ja caimos no fallback local no passo 1 (a propria Agnes
+    // falhou no DECIDE — chama-la de novo aqui so repetiria a falha).
+    If lFallbackLocal
         cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
-        ConOut(cEsc + "[2m  [AGNES REFINE FALHOU - exibindo resposta local]" + cEsc + "[0m")
     Else
-        cBody := FWHTTPBODY()
-        oJ := JsonObject():New()
-        If oJ:FromJson(cBody)
-            oChoice := oJ["choices"][1]
-            If ValType(oChoice) == "O" .And. !Empty(AllTrim(oChoice["message"]["content"]))
-                cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;31")
+        FWHTTPHEADER("Authorization", "Bearer " + cApiKey)
+        cBody := '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"' + ;
+            JsonEscape("Pergunta original: " + cPrompt + Chr(10) + ;
+            "Resposta do modelo local (" + cModeloEscolhido + "): " + cLocalAnswer + Chr(10) + ;
+            "Revise essa resposta mantendo o mesmo idioma e conteudo, melhorando clareza e correcao. Responda apenas com a versao final.") + ;
+            '"}],"stream":false,"max_tokens":500}'
+        nStatus := FWHTTPPOST("https://apihub.agnes-ai.com/v1/chat/completions", cBody, "application/json")
+        FWHTTPCLEARHEADERS()
+
+        If nStatus != 200
+            cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
+            ConOut(cEsc + "[2m  [AGNES REFINE FALHOU - exibindo resposta local]" + cEsc + "[0m")
+        Else
+            cBody := FWHTTPBODY()
+            oJ := JsonObject():New()
+            If oJ:FromJson(cBody)
+                oChoice := oJ["choices"][1]
+                If ValType(oChoice) == "O" .And. !Empty(AllTrim(oChoice["message"]["content"]))
+                    cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;31")
+                Else
+                    cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
+                    ConOut(cEsc + "[2m  [AGNES SEM CONTEUDO - exibindo resposta local]" + cEsc + "[0m")
+                EndIf
             Else
                 cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
-                ConOut(cEsc + "[2m  [AGNES SEM CONTEUDO - exibindo resposta local]" + cEsc + "[0m")
+                ConOut(cEsc + "[2m  [AGNES PARSE ERR - exibindo resposta local]" + cEsc + "[0m")
             EndIf
-        Else
-            cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;31")
-            ConOut(cEsc + "[2m  [AGNES PARSE ERR - exibindo resposta local]" + cEsc + "[0m")
         EndIf
     EndIf
 
