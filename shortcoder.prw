@@ -908,6 +908,7 @@ Static Function OrchestratorOllamaJob(cModel, cPrompt)
     Local cContent := ""
 
     cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
+    FWHTTPTIMEOUT(90)
     nStatus := FWHTTPPOST("http://127.0.0.1:11434/v1/chat/completions", cBody, "application/json")
 
     If nStatus == 200
