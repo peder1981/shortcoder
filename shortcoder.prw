@@ -93,6 +93,8 @@ User Function Main()
                 RunErnestoAgent(cEsc, cInput, cModel, nWidth, @aHistory, nErnestoTimeout)
             ElseIf cSelectedAgent == "agnes"
                 RunAgnesAgent(cEsc, cInput, nWidth, @aHistory)
+            ElseIf cSelectedAgent == "orchestrator"
+                RunOrchestratorAgent(cEsc, cInput, aModels, nWidth, @aHistory)
             Else
                 RunOllamaAgent(cEsc, cInput, cModel, nWidth, @aHistory)
             EndIf
@@ -602,6 +604,8 @@ Static Function AgentColor(cAgent)
         Return "1;35"
     Case Lower(cAgent) == "agnes"
         Return "1;33"
+    Case Lower(cAgent) == "orchestrator"
+        Return "1;31"
     EndCase
 Return "1;37"
 
@@ -691,10 +695,11 @@ Static Function PickAgent(cEsc, cCurrent, nWidth)
     ConOut(BoxOptionLine(cEsc, "2", "1;32", "mem0",    "Persistent memory queries",       nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "3", "1;35", "ernesto", "RAG + Memory (slow, >30s)",       nInner, "1;33"))
     ConOut(BoxOptionLine(cEsc, "4", "1;33", "agnes",   "Agnes 2.5 Flash (remote, cloud)", nInner, "1;33"))
+    ConOut(BoxOptionLine(cEsc, "5", "1;31", "orchestrator", "Agnes roteia + Ollama local (async)", nInner, "1;33"))
     ConOut(BoxBottomD(cEsc, nInner, "1;33"))
     ConOut("")
 
-    cChoice := AllTrim(ConIn("Select agent [1-4] (Enter=" + cCurrent + "): "))
+    cChoice := AllTrim(ConIn("Select agent [1-5] (Enter=" + cCurrent + "): "))
     ConOut("")
 
     If cChoice == "1"
@@ -705,6 +710,8 @@ Static Function PickAgent(cEsc, cCurrent, nWidth)
         Return "ernesto"
     ElseIf cChoice == "4"
         Return "agnes"
+    ElseIf cChoice == "5"
+        Return "orchestrator"
     EndIf
 Return cCurrent
 
@@ -885,6 +892,220 @@ Static Function RunAgnesAgent(cEsc, cPrompt, nWidth, aHistory)
     ConOut("")
 
     aAdd(aHistory, {"agnes", cPrompt, Seconds() - nStart})
+Return Nil
+
+/*/{Protheus.doc} OrchestratorOllamaJob
+    Funcao-alvo de FWJOBSTART: roda isolada num VM proprio (sem acesso a
+    variaveis do VM principal), faz a chamada HTTP ao Ollama local e
+    retorna a string da resposta. Sem UI (ConOut/Box) aqui — quem exibe
+    e RunOrchestratorAgent, depois de FWJOBPOLL trazer o resultado.
+    Retorna "" em qualquer erro (status != 200, parse falho, sem conteudo).
+@type function
+/*/
+Static Function OrchestratorOllamaJob(cModel, cPrompt)
+    Local nStatus
+    Local cBody, oJ, oChoice
+    Local cContent := ""
+
+    cBody := '{"model":"' + cModel + '","messages":[{"role":"user","content":"' + JsonEscape(cPrompt) + '"}],"stream":false,"max_tokens":500}'
+    nStatus := FWHTTPPOST("http://127.0.0.1:11434/v1/chat/completions", cBody, "application/json")
+
+    If nStatus == 200
+        cBody := FWHTTPBODY()
+        oJ := JsonObject():New()
+        If oJ:FromJson(cBody)
+            oChoice := oJ["choices"][1]
+            If ValType(oChoice) == "O"
+                cContent := AllTrim(oChoice["message"]["content"])
+                If Empty(cContent)
+                    cContent := AllTrim(oChoice["message"]["reasoning"])
+                EndIf
+            EndIf
+        EndIf
+    EndIf
+Return cContent
+
+/*/{Protheus.doc} RunOrchestratorAgent
+    Agente orchestrator: Agnes decide qual modelo Ollama local responder
+    (DECIDE), despacha essa chamada numa goroutine assincrona via
+    FWJOBSTART (DESPACHA), anima um spinner enquanto FWJOBPOLL nao traz
+    resultado (ESPERA), e manda a resposta local de volta pra Agnes
+    revisar antes de exibir (REFINA).
+@type function
+/*/
+Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, nWidth, aHistory)
+    Local nInner := nWidth - 2
+    Local cApiKey := GetEnv("AGNES_API_KEY", "")
+    Local nStart := Seconds()
+    Local cResponse
+    Local cModeloEscolhido
+    Local cJobId
+    Local uLocalResult
+    Local cLocalAnswer
+    Local nStatus
+    Local cBody, oJ, oChoice
+    Local cErr
+    Local aSpin := {"|", "/", "-", "\"}
+    Local nSpin := 1
+
+    If Empty(cApiKey)
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] AGNES_API_KEY nao configurada" + cEsc + "[0m", nInner, "1;33")
+        ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
+        aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
+        Return Nil
+    EndIf
+
+    If Len(aModels) == 0
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] nenhum modelo local disponivel" + cEsc + "[0m", nInner, "1;33")
+        ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
+        aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
+        Return Nil
+    EndIf
+
+    // ---- 1) DECIDE: Agnes escolhe o modelo local ----
+    // DecideOrchestratorModel retorna "" especificamente quando a chamada
+    // HTTP a Agnes falhou (status != 200) — nesse caso abortamos, sem
+    // despachar job. Se a chamada teve sucesso mas Agnes respondeu um id
+    // que nao bate com nenhum aModels[i][1], a funcao ja faz fallback
+    // silencioso internamente e devolve um id valido (nunca "").
+    cModeloEscolhido := DecideOrchestratorModel(cApiKey, aModels, cPrompt)
+    If Empty(cModeloEscolhido)
+        cErr := FWHTTPERROR()
+        If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;33m[TIMEOUT] Agnes API too slow (decide)" + cEsc + "[0m", nInner, "1;33")
+        Else
+            cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] Agnes (decide) falhou — " + Left(cErr, 40) + cEsc + "[0m", nInner, "1;33")
+        EndIf
+        ShowOrchestratorBox(cEsc, "-", cResponse, nInner, Seconds() - nStart)
+        aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
+        Return Nil
+    EndIf
+
+    // ---- 2) DESPACHA: chamada assincrona ao Ollama local ----
+    cJobId := FWJOBSTART("OrchestratorOllamaJob", cModeloEscolhido, cPrompt)
+
+    // ---- 3) ESPERA com spinner ----
+    uLocalResult := FWJOBPOLL(cJobId)
+    Do While ValType(uLocalResult) == "U"
+        ConOutRaw(cEsc + "[2m  aguardando " + cModeloEscolhido + "... " + aSpin[nSpin] + cEsc + "[0m" + cEsc + "[K" + Chr(13))
+        nSpin++
+        If nSpin > Len(aSpin)
+            nSpin := 1
+        EndIf
+        Sleep(150)
+        uLocalResult := FWJOBPOLL(cJobId)
+    EndDo
+    ConOutRaw(cEsc + "[K" + Chr(13))
+    cLocalAnswer := uLocalResult
+
+    If Empty(cLocalAnswer)
+        cResponse := BoxLineAuto(cEsc, cEsc + "[1;31m[ERROR] " + cModeloEscolhido + " nao respondeu" + cEsc + "[0m", nInner, "1;33")
+        ShowOrchestratorBox(cEsc, cModeloEscolhido, cResponse, nInner, Seconds() - nStart)
+        aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
+        Return Nil
+    EndIf
+
+    // ---- 4) REFINA: Agnes revisa a resposta local ----
+    FWHTTPHEADER("Authorization", "Bearer " + cApiKey)
+    cBody := '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"' + ;
+        JsonEscape("Pergunta original: " + cPrompt + Chr(10) + ;
+        "Resposta do modelo local (" + cModeloEscolhido + "): " + cLocalAnswer + Chr(10) + ;
+        "Revise essa resposta mantendo o mesmo idioma e conteudo, melhorando clareza e correcao. Responda apenas com a versao final.") + ;
+        '"}],"stream":false,"max_tokens":500}'
+    nStatus := FWHTTPPOST("https://apihub.agnes-ai.com/v1/chat/completions", cBody, "application/json")
+    FWHTTPCLEARHEADERS()
+
+    If nStatus != 200
+        cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+        ConOut(cEsc + "[2m  [AGNES REFINE FALHOU - exibindo resposta local]" + cEsc + "[0m")
+    Else
+        cBody := FWHTTPBODY()
+        oJ := JsonObject():New()
+        If oJ:FromJson(cBody)
+            oChoice := oJ["choices"][1]
+            If ValType(oChoice) == "O" .And. !Empty(AllTrim(oChoice["message"]["content"]))
+                cResponse := FormatMarkdownForBox(cEsc, AllTrim(oChoice["message"]["content"]), nInner, "1;33")
+            Else
+                cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+                ConOut(cEsc + "[2m  [AGNES SEM CONTEUDO - exibindo resposta local]" + cEsc + "[0m")
+            EndIf
+        Else
+            cResponse := FormatMarkdownForBox(cEsc, cLocalAnswer, nInner, "1;33")
+            ConOut(cEsc + "[2m  [AGNES PARSE ERR - exibindo resposta local]" + cEsc + "[0m")
+        EndIf
+    EndIf
+
+    ShowOrchestratorBox(cEsc, cModeloEscolhido, cResponse, nInner, Seconds() - nStart)
+    aAdd(aHistory, {"orchestrator", cPrompt, Seconds() - nStart})
+Return Nil
+
+/*/{Protheus.doc} DecideOrchestratorModel
+    Chama Agnes pedindo APENAS o id do modelo Ollama local mais adequado
+    pra pergunta. Retorna "" especificamente quando a chamada HTTP falhou
+    (status != 200) — sinal para o chamador abortar (RunOrchestratorAgent
+    le FWHTTPERROR() logo em seguida, ainda valido pois nenhuma outra
+    chamada HTTP acontece entre esta funcao e a leitura do erro).
+    Se a chamada teve sucesso mas a resposta nao bate com nenhum
+    aModels[i][1] conhecido (texto livre, modelo inventado), cai no
+    fallback silencioso aModels[1][1] — este caso NUNCA retorna "".
+@type function
+/*/
+Static Function DecideOrchestratorModel(cApiKey, aModels, cPrompt)
+    Local cModelsList := ""
+    Local i
+    Local cBody, oJ, oChoice, cEscolhido
+    Local nStatus
+
+    For i := 1 To Len(aModels)
+        If i > 1
+            cModelsList += ", "
+        EndIf
+        cModelsList += aModels[i][1]
+    Next i
+
+    FWHTTPHEADER("Authorization", "Bearer " + cApiKey)
+    cBody := '{"model":"agnes-2.5-flash","messages":[{"role":"user","content":"' + ;
+        JsonEscape("Voce e um roteador. Escolha o modelo mais adequado da lista abaixo para responder a pergunta do usuario. Responda APENAS com o id exato do modelo, sem explicacoes." + Chr(10) + ;
+        "Modelos disponiveis: " + cModelsList + Chr(10) + ;
+        "Pergunta: " + cPrompt) + ;
+        '"}],"stream":false,"max_tokens":50}'
+    nStatus := FWHTTPPOST("https://apihub.agnes-ai.com/v1/chat/completions", cBody, "application/json")
+    FWHTTPCLEARHEADERS()
+
+    If nStatus != 200
+        Return ""
+    EndIf
+
+    oJ := JsonObject():New()
+    If oJ:FromJson(FWHTTPBODY())
+        oChoice := oJ["choices"][1]
+        If ValType(oChoice) == "O"
+            cEscolhido := AllTrim(oChoice["message"]["content"])
+            For i := 1 To Len(aModels)
+                If Lower(aModels[i][1]) == Lower(cEscolhido) .Or. Lower(aModels[i][1]) $ Lower(cEscolhido)
+                    Return aModels[i][1]
+                EndIf
+            Next i
+        EndIf
+    EndIf
+
+Return aModels[1][1]
+
+/*/{Protheus.doc} ShowOrchestratorBox
+    Caixa de exibicao padrao do agente orchestrator (mesmo padrao visual
+    dos outros agentes), mostrando qual modelo local foi escolhido no
+    subtitulo.
+@type function
+/*/
+Static Function ShowOrchestratorBox(cEsc, cModeloEscolhido, cResponse, nInner, nElapsed)
+    ConOut("")
+    ConOut(BoxTop(cEsc, nInner, "1;31"))
+    ConOut(BoxAgentTitle(cEsc, "AGENT:ORCHESTRATOR", cModeloEscolhido, nInner, "1;31"))
+    ConOut(BoxDiv(cEsc, nInner, "1;31"))
+    ConOut(cResponse)
+    ConOut(BoxBottom(cEsc, nInner, "1;31"))
+    ConOut(cEsc + "[2m  " + AllTrim(Str(nElapsed, 10, 1)) + "s response time" + cEsc + "[0m")
+    ConOut("")
 Return Nil
 
 /*/{Protheus.doc} BoxAgentTitle
