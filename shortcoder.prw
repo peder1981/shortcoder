@@ -147,9 +147,6 @@ Static Function LoadModels(cPath, aModels, cDefModel)
             oModel := aProvModels[j]
             If ValType(oModel["id"]) == "C"
                 cId := oModel["id"]
-                If At("/", cId) > 0
-                    cId := SubStr(cId, At("/", cId) + 1)
-                EndIf
                 lFound := .F.
                 For nIdx := 1 To Len(aModels)
                     If aModels[nIdx][1] == cId
