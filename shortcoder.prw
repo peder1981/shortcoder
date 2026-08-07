@@ -1430,7 +1430,12 @@ Static Function DetectAgent(cInput, cDefaultAgent)
         Return "mem0"
     EndIf
     
-    // Regra 2: Palavras-chave de dominio Protheus/AdvPL
+    // Regra 2: Palavras-chave de dominio Protheus/AdvPL — só se aplica quando o
+    // usuario nao escolheu um agente explicitamente (evita sobrepor /agent).
+    If Lower(cDefaultAgent) != "ollama"
+        Return cDefaultAgent
+    EndIf
+
     Local aProtheusKeywords := { ;
         "campo", "tabela", "sx2", "sx3", "six", "formulario", "rotina", ;
         "como funciona", "onde esta", "o que e", "query", "sql", "trigger", ;
