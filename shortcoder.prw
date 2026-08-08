@@ -902,6 +902,101 @@ Return Nil
     um generico "nao respondeu".
 @type function
 /*/
+/*/{Protheus.doc} FilterFastModels
+    Remove da lista oferecida ao DECIDE da Agnes os modelos Ollama pesados
+    (>3GB, cold-load lento demais para dispatch interativo no hardware
+    atual) e os modelos que nao sao de chat de proposito geral (embed,
+    vision, speech, guardian). Se a consulta ao Ollama falhar ou o modelo
+    nao aparecer em /api/tags, ele e mantido na lista (fail-open — nunca
+    excluir por falta de dado).
+@type function
+/*/
+Static Function FilterFastModels(aModels)
+    Local aSizes := GetOllamaModelSizes()
+    Local lKnownSizes := Len(aSizes) > 0
+    Local aOut := {}
+    Local aExcludeKeywords := {"embed", "vision", "speech", "guardian"}
+    Local nMaxBytes := 3 * 1024 * 1024 * 1024
+    Local i, j, cId, nSize, lExcluded
+
+    For i := 1 To Len(aModels)
+        cId := aModels[i][1]
+        lExcluded := .F.
+
+        For j := 1 To Len(aExcludeKeywords)
+            If aExcludeKeywords[j] $ Lower(cId)
+                lExcluded := .T.
+                Exit
+            EndIf
+        Next j
+
+        // So aplica os criterios de peso/existencia quando a consulta ao
+        // Ollama funcionou (lKnownSizes). Se falhou, mantem tudo sem filtro
+        // de peso (fail-open) — melhor arriscar lentidao do que ficar sem
+        // nenhum modelo pra oferecer a Agnes.
+        If !lExcluded .And. lKnownSizes
+            nSize := FindModelSize(aSizes, cId)
+            If nSize == 0
+                // nao existe no Ollama (ex: "fortress", roteador virtual
+                // definido so no models.json) — dispatch direto sempre
+                // resultaria em 404
+                lExcluded := .T.
+            ElseIf nSize > nMaxBytes
+                lExcluded := .T.
+            EndIf
+        EndIf
+
+        If !lExcluded
+            aAdd(aOut, aModels[i])
+        EndIf
+    Next i
+Return aOut
+
+/*/{Protheus.doc} GetOllamaModelSizes
+    Consulta http://127.0.0.1:11434/api/tags e devolve array {cNome, nBytes}
+    por modelo instalado. Array vazio em qualquer falha (Ollama fora do ar,
+    JSON invalido, etc.) — chamador deve tratar como "sem info de tamanho".
+@type function
+/*/
+Static Function GetOllamaModelSizes()
+    Local aOut := {}
+    Local nStatus, oJ, aModelsJson, i
+
+    nStatus := FWHTTPGET("http://127.0.0.1:11434/api/tags")
+    If nStatus != 200
+        Return aOut
+    EndIf
+
+    oJ := JsonObject():New()
+    If !oJ:FromJson(FWHTTPBODY())
+        Return aOut
+    EndIf
+
+    aModelsJson := oJ["models"]
+    If ValType(aModelsJson) != "A"
+        Return aOut
+    EndIf
+
+    For i := 1 To Len(aModelsJson)
+        aAdd(aOut, {aModelsJson[i]["name"], aModelsJson[i]["size"]})
+    Next i
+Return aOut
+
+/*/{Protheus.doc} FindModelSize
+    Busca o tamanho (bytes) de cId dentro do array devolvido por
+    GetOllamaModelSizes. Retorna 0 quando nao encontrado (tratado como
+    "tamanho desconhecido, nao excluir por peso" pelo chamador).
+@type function
+/*/
+Static Function FindModelSize(aSizes, cId)
+    Local i
+    For i := 1 To Len(aSizes)
+        If aSizes[i][1] == cId
+            Return aSizes[i][2]
+        EndIf
+    Next i
+Return 0
+
 Static Function OrchestratorOllamaJob(cModel, cPrompt)
     Local nStatus
     Local cBody, oJ, oChoice
@@ -971,13 +1066,19 @@ Static Function RunOrchestratorAgent(cEsc, cPrompt, aModels, cModel, nWidth, aHi
         Return Nil
     EndIf
 
+    // ---- 0) Restringe a lista oferecida a Agnes aos modelos leves/rapidos ----
+    Local aFastModels := FilterFastModels(aModels)
+    If Len(aFastModels) == 0
+        aFastModels := aModels
+    EndIf
+
     // ---- 1) DECIDE: Agnes escolhe o modelo local ----
     // DecideOrchestratorModel retorna "" especificamente quando a chamada
     // HTTP a Agnes falhou (status != 200). Se a chamada teve sucesso mas
-    // Agnes respondeu um id que nao bate com nenhum aModels[i][1], a
+    // Agnes respondeu um id que nao bate com nenhum aFastModels[i][1], a
     // funcao ja faz fallback silencioso internamente e devolve um id
     // valido (nunca "").
-    cModeloEscolhido := DecideOrchestratorModel(cApiKey, aModels, cPrompt)
+    cModeloEscolhido := DecideOrchestratorModel(cApiKey, aFastModels, cPrompt)
     If Empty(cModeloEscolhido)
         cErr := FWHTTPERROR()
         If !Empty(cErr) .And. At("timeout", Lower(cErr)) > 0
